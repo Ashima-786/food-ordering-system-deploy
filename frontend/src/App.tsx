@@ -1,15 +1,45 @@
-
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import './App.css'
 
+type Food = {
+  id: number
+  name: string
+  category: string
+  price: number
+  emoji: string
+  image?: string
+  description: string
+  rating: string
+  tag: string
+  color: string
+}
+type Cart = Record<number, number>
+type ActiveView =
+  | 'home'
+  | 'favorites'
+  | 'all-foods'
+  | 'restaurants'
+  | 'restaurant-menu'
+
+type Restaurant = {
+  id: string
+  name: string
+  city: string
+  cuisines: string[]
+  image: string
+  rating: string
+  priceBand?: string
+  address?: string
+  menuItems?: Food[]
+}
 const foods = [
   {
     id: 1,
     name: 'Grilled Chicken with Veggies',
     category: 'Healthy',
     price: 299,
-    image: 'https://images.unsplash.com/photo-1532550907401-a500c9a57435?auto=format&fit=crop&w=900&q=85',
+    image: '/images/grilled chicken.jpg',
     description: 'Grilled chicken with fresh garden vegetables',
     rating: '4.8',
     tag: 'Bestseller',
@@ -107,9 +137,7 @@ const cuisines = [
   },
 ]
 
-type Food = (typeof foods)[number]
-type Cart = Record<number, number>
-type ActiveView = 'home' | 'favorites'
+
 
 const categories = [
   'All',
@@ -142,12 +170,21 @@ function FoodCard({
         className="food-art"
         style={{ backgroundColor: food.color }}
       >
-        <img
-          className="food-image"
-          src={food.image}
-          alt={food.name}
-          loading="lazy"
-        />
+        {food.image ? (
+          <img
+            className="food-image"
+            src={food.image}
+            alt={food.name}
+            loading="lazy"
+            onError={(event) => {
+              event.currentTarget.style.display = 'none'
+            }}
+          />
+        ) : (
+          <span className="food-image-placeholder" aria-label={food.name}>
+            {food.emoji}
+          </span>
+        )}
 
         <span className="food-tag">{food.tag}</span>
 
@@ -189,6 +226,132 @@ function FoodCard({
   )
 }
 
+function RestaurantCard({
+  restaurant,
+  onClick,
+}: {
+  restaurant: Restaurant
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      className="restaurant-card"
+      onClick={onClick}
+    >
+      <div className="restaurant-image-wrap">
+        {restaurant.image ? (
+          <img
+            className="restaurant-image"
+            src={restaurant.image}
+            alt={restaurant.name}
+            loading="lazy"
+            onError={(event) => {
+              event.currentTarget.style.visibility = 'hidden'
+            }}
+          />
+        ) : (
+          <div className="restaurant-image-placeholder">
+            🍽️
+          </div>
+        )}
+
+        <span className="restaurant-rating">
+          ★ {restaurant.rating}
+        </span>
+      </div>
+
+      <div className="restaurant-info">
+        <h3>{restaurant.name}</h3>
+
+        <p>
+          {restaurant.cuisines.length
+            ? restaurant.cuisines.join(' · ')
+            : 'Discover the menu'}
+        </p>
+
+        <small>
+          {restaurant.address || restaurant.city || 'Restaurant'}
+          {restaurant.priceBand
+            ? ` · ${restaurant.priceBand}`
+            : ''}
+        </small>
+
+        <span className="restaurant-card-link">
+          Explore restaurant →
+        </span>
+      </div>
+    </button>
+  )
+}
+const API_BASE = 'https://indiarestros.com/api/v1'
+
+
+
+function getRestaurantImage(restaurant: any): string {
+  const photo =
+    restaurant.photos?.[0]?.url ||
+    restaurant.photos?.[0]?.thumb ||
+    restaurant.photo ||
+    ''
+
+  if (!photo) return ''
+
+  if (photo.startsWith('http://') || photo.startsWith('https://')) {
+    return photo
+  }
+
+  return `https://indiarestros.com${photo.startsWith('/') ? '' : '/'}${photo}`
+}
+
+
+
+function mapRestaurant(data: any): Restaurant {
+  return {
+    id: String(data.id ?? data.irr_id ?? data.slug ?? data.name),
+    name: data.name ?? 'Restaurant',
+    city: data.city ?? '',
+    cuisines: Array.isArray(data.cuisines)
+      ? data.cuisines
+      : data.cuisine
+        ? [data.cuisine]
+        : [],
+    image: getRestaurantImage(data),
+    rating: String(
+      data.ratings?.foodie ??
+      data.ratings?.external?.rating ??
+      data.rating ??
+      '—',
+    ),
+    priceBand: data.price_band ?? '',
+    address: data.address ?? data.locality ?? '',
+  }
+}
+
+
+async function fetchRestaurants(city: string): Promise<Restaurant[]> {
+  const params = new URLSearchParams({
+    city: city.trim().toLowerCase(),
+    limit: '12',
+  })
+
+  const response = await fetch(
+    `${API_BASE}/restaurants?${params.toString()}`,
+  )
+
+  if (!response.ok) {
+    throw new Error('Unable to load restaurants. Please try again.')
+  }
+
+  const result = await response.json()
+
+  const records = Array.isArray(result)
+    ? result
+    : result.data ?? result.restaurants ?? result.results ?? []
+
+  return records.map(mapRestaurant)
+}
+
 function App() {
   const [cart, setCart] = useState<Cart>({})
   const [favorites, setFavorites] = useState<number[]>([])
@@ -196,22 +359,137 @@ function App() {
   const [cartOpen, setCartOpen] = useState(false)
   const [activeCategory, setActiveCategory] = useState('All')
   const [search, setSearch] = useState('')
+  const [restaurants, setRestaurants] = useState<Restaurant[]>([])
+  const [restaurantCity, setRestaurantCity] = useState('chennai')
+  const [restaurantsLoading, setRestaurantsLoading] = useState(false)
+  const [restaurantMenu, setRestaurantMenu] = useState<Food[]>([])
+  const [menuLoading, setMenuLoading] = useState(false)
+  const [menuError, setMenuError] = useState('')
+  const [restaurantError, setRestaurantError] = useState('')
+  const [selectedRestaurant, setSelectedRestaurant] =
+    useState<Restaurant | null>(null)
+    
+useEffect(() => {
+  let cancelled = false
+
+  async function loadRestaurants() {
+    setRestaurantsLoading(true)
+    setRestaurantError('')
+
+    try {
+      const data = await fetchRestaurants(restaurantCity)
+
+      if (!cancelled) {
+        setRestaurants(data)
+      }
+    } catch (error) {
+      if (!cancelled) {
+        setRestaurantError(
+          error instanceof Error
+            ? error.message
+            : 'Unable to load restaurants.',
+        )
+      }
+    } finally {
+      if (!cancelled) {
+        setRestaurantsLoading(false)
+      }
+    }
+  }
+
+  loadRestaurants()
+
+  return () => {
+    cancelled = true
+  }
+}, [restaurantCity])
+
+useEffect(() => {
+  if (activeView !== 'restaurant-menu' || !selectedRestaurant) return
+
+  let cancelled = false
+
+  async function loadMenu() {
+    setMenuLoading(true)
+    setMenuError('')
+    setRestaurantMenu([])
+
+    try {
+      const response = await fetch(
+        `${API_BASE}/restaurants/${selectedRestaurant!.id}/menu`
+      )
+
+      if (!response.ok) {
+        throw new Error(`Unable to load menu (${response.status}).`)
+      }
+
+      const data = await response.json()
+
+      const menuFoods: Food[] = (data.sections ?? []).flatMap(
+        (section: any, sectionIndex: number) =>
+          (section.items ?? []).map((item: any, itemIndex: number) => {
+            // Create a consistent numeric ID for the cart.
+            const id = Array.from(
+              `${selectedRestaurant!.id}-${item.dish ?? item.name}`
+            ).reduce(
+              (hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0,
+              0
+            ) + 100000
+
+            return {
+              id,
+              name: item.name,
+              category: section.name ?? 'Menu',
+              price: Number(item.price ?? 0),
+              emoji: item.veg ? '🥗' : '🍽️',
+              image: item.image ?? item.photo ?? item.image_url ?? '',
+              description: item.desc ?? '',
+              rating: '—',
+              tag: item.veg ? 'Veg' : 'Non-veg',
+              color: item.veg ? '#e9f1df' : '#fff0dc',
+            }
+          })
+      )
+
+      if (!cancelled) setRestaurantMenu(menuFoods)
+    } catch (error) {
+      if (!cancelled) {
+        setMenuError(
+          error instanceof Error ? error.message : 'Unable to load menu.'
+        )
+      }
+    } finally {
+      if (!cancelled) setMenuLoading(false)
+    }
+  }
+
+  loadMenu()
+
+  return () => {
+    cancelled = true
+  }
+}, [activeView, selectedRestaurant])
+
 
   const cartCount = Object.values(cart).reduce(
     (sum, quantity) => sum + quantity,
     0,
   )
 
-  const cartItems = foods.filter((food) => (cart[food.id] ?? 0) > 0)
+  const allFoods = [...foods, ...restaurantMenu]
 
-  const favoriteItems = foods.filter((food) =>
-    favorites.includes(food.id),
-  )
+const cartItems = allFoods.filter(
+  (food) => (cart[food.id] ?? 0) > 0
+)
 
-  const subtotal = cartItems.reduce(
-    (sum, food) => sum + food.price * cart[food.id],
-    0,
-  )
+const favoriteItems = allFoods.filter(
+  (food) => favorites.includes(food.id)
+)
+
+const subtotal = cartItems.reduce(
+  (sum, food) => sum + food.price * cart[food.id],
+  0
+)
 
   const deliveryFee = subtotal === 0 || subtotal >= 499 ? 0 : 40
   const total = subtotal + deliveryFee
@@ -387,7 +665,20 @@ function App() {
           </button>
 
           <Link to="/login" className="account-link">
-            <span>♙</span>
+            <span className="account-icon">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="8" r="4" />
+                <path d="M4.5 21a7.5 7.5 0 0 1 15 0" />
+              </svg>
+            </span>
             <small>Account</small>
           </Link>
         </nav>
@@ -406,7 +697,22 @@ function App() {
                 setCartOpen(false)
               }}
             >
-              <span>⌂</span>Home
+              <span className="nav-icon">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="m3 10 9-7 9 7" />
+                  <path d="M5 9v12h14V9" />
+                  <path d="M9 21v-7h6v7" />
+                </svg>
+              </span>
+              Home
             </a>
 
             <a
@@ -417,7 +723,23 @@ function App() {
                 setCartOpen(false)
               }}
             >
-              <span>♧</span>Menu
+              <span className="nav-icon">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M4 5h16" />
+                  <path d="M4 12h16" />
+                  <path d="M4 19h16" />
+                  <circle cx="2.5" cy="5" r="0.5" fill="currentColor" stroke="none" />
+                </svg>
+              </span>
+              Menu
             </a>
 
             <a
@@ -428,7 +750,23 @@ function App() {
                 setCartOpen(false)
               }}
             >
-              <span>▦</span>Categories
+              <span className="nav-icon">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <rect x="3" y="3" width="7" height="7" rx="1.5" />
+                  <rect x="14" y="3" width="7" height="7" rx="1.5" />
+                  <rect x="3" y="14" width="7" height="7" rx="1.5" />
+                  <rect x="14" y="14" width="7" height="7" rx="1.5" />
+                </svg>
+              </span>
+              Categories
             </a>
 
             <a
@@ -439,7 +777,22 @@ function App() {
                 setCartOpen(false)
               }}
             >
-              <span>◇</span>Offers
+              <span className="nav-icon">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M20.5 13.5 13 21 3 11V3h8l9.5 10.5Z" />
+                  <circle cx="7.5" cy="7.5" r="1.2" />
+                  <path d="m12 8 4 4" />
+                </svg>
+              </span>
+              Offers
             </a>
 
             <button
@@ -447,7 +800,22 @@ function App() {
               className="sidebar-link sidebar-button"
               onClick={openCart}
             >
-              <span>▣</span>Cart ({cartCount})
+              <span className="nav-icon">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <circle cx="9" cy="21" r="1" />
+                  <circle cx="19" cy="21" r="1" />
+                  <path d="M1 2h4l2.7 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 7H6" />
+                </svg>
+              </span>
+              Cart ({cartCount})
             </button>
 
             <button
@@ -461,7 +829,20 @@ function App() {
                 window.scrollTo({ top: 0, behavior: 'smooth' })
               }}
             >
-              <span>♡</span>Favorites
+              <span className="nav-icon">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8l1.1 1.1L12 21l7.8-7.5 1.1-1.1a5.5 5.5 0 0 0-.1-7.8Z" />
+                </svg>
+              </span>
+              Favorites
             </button>
 
             <a
@@ -472,10 +853,26 @@ function App() {
                 setCartOpen(false)
               }}
             >
-              <span>ⓘ</span>Support
+              
+            <span className="nav-icon">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M3 13v-2a9 9 0 0 1 18 0v2" />
+                <rect x="3" y="12" width="4" height="7" rx="2" />
+                <rect x="17" y="12" width="4" height="7" rx="2" />
+                <path d="M21 17v1a4 4 0 0 1-4 4h-3" />
+              </svg>
+            </span>
+            Support
             </a>
           </nav>
-
           <div className="sidebar-offer">
             <span>YOUR FIRST BITE</span>
             <h3>Get 20% OFF</h3>
@@ -518,13 +915,13 @@ function App() {
                   </div>
 
                   <div className="hero-social-proof">
-                    <span className="avatar-stack" aria-hidden="true">
-                      <i>R</i>
-                      <i>A</i>
-                      <i>S</i>
-                      <i>K</i>
-                    </span>
-                    <span>
+                      <span className="avatar-stack" aria-hidden="true">
+                        <img src="/images/99230041167-Ranjana Gayatri B.jpeg" alt="" />
+                        <img src="/images/ashima.jpeg" alt="" />
+                        <img src="/images/NITHEES.jpg" alt="" />
+                        <img src="/images/kasim.jpeg" alt="" />
+                      </span>
+                      <span>
                       <strong>50K+</strong> happy food lovers
                     </span>
                   </div>
@@ -533,13 +930,13 @@ function App() {
                 <div className="hero-visual">
                   <div className="hero-decoration" />
                   <img
-                    src="/src/assets/hero.png"
+                    src="/images/chickenburger-removebg-preview.png"
                     alt="Zestora featured meal"
                     className="hero-image"
                   />
                   <div className="hero-food-card">
                     <strong>Today's special</strong>
-                    <span>Classic Zest Burger</span>
+                    <span>Chicken Burger</span>
                     <b>₹199.00</b>
                   </div>
                   <span className="hero-sparkle sparkle-one">✦</span>
@@ -548,34 +945,66 @@ function App() {
               </section>
 
               <section className="benefits" aria-label="Our service benefits">
-                <div>
-                  <span>♧</span>
+                <div className="feature-card">
+                  <span className="feature-icon">
+                    <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
+                      <path d="M12 27 32 10 52 27" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d="M17 25V51H47V25" fill="#FFD5AB" stroke="currentColor" strokeWidth="2.5" strokeLinejoin="round" />
+                      <path d="M25 51V38Q32 30 39 38V51" fill="#FFF9F2" stroke="currentColor" strokeWidth="2.5" />
+                      <path d="M44 12 49 7M47 17 55 16" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                    </svg>
+                  </span>
                   <p>
                     <strong>Free Delivery</strong>
                     <small>On orders over ₹499</small>
                   </p>
                 </div>
-                <div>
-                  <span>⟳</span>
+
+                <div className="feature-card">
+                  <span className="feature-icon">
+                    <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
+                      <rect x="12" y="12" width="40" height="40" rx="12" fill="#FFD5AB" stroke="currentColor" strokeWidth="2.5" />
+                      <path d="M23 23H41M23 31H36M23 39H31" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                      <circle cx="44" cy="43" r="10" fill="#FFF9F2" stroke="currentColor" strokeWidth="2.5" />
+                      <path d="M44 37V43L48 46" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                    </svg>
+                  </span>
                   <p>
                     <strong>Easy Ordering</strong>
                     <small>A few clicks to enjoy</small>
                   </p>
                 </div>
-                <div>
-                  <span>♢</span>
+
+                <div className="feature-card">
+                  <span className="feature-icon">
+                    <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
+                      <path d="M32 8 49 15V29Q47 43 32 53Q17 43 15 29V15Z" fill="#FFD5AB" stroke="currentColor" strokeWidth="2.5" strokeLinejoin="round" />
+                      <rect x="24" y="25" width="16" height="12" rx="3" fill="#FFF9F2" stroke="currentColor" strokeWidth="2.5" />
+                      <path d="M27 25V21A5 5 0 0 1 37 21V25" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                    </svg>
+                  </span>
                   <p>
                     <strong>Secure Payment</strong>
                     <small>Checkout with confidence</small>
                   </p>
                 </div>
-                <div>
-                  <span>♧</span>
+
+                <div className="feature-card">
+                  <span className="feature-icon">
+                    <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
+                      <path d="M15 34V29A17 17 0 0 1 49 29V34" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                      <rect x="11" y="30" width="11" height="17" rx="5" fill="#FFD5AB" stroke="currentColor" strokeWidth="2.5" />
+                      <rect x="42" y="30" width="11" height="17" rx="5" fill="#FFD5AB" stroke="currentColor" strokeWidth="2.5" />
+                      <path d="M48 47Q45 54 34 54H29" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                      <rect x="23" y="48" width="12" height="9" rx="3" fill="#FFF9F2" stroke="currentColor" strokeWidth="2" />
+                    </svg>
+                  </span>
                   <p>
                     <strong>Friendly Support</strong>
                     <small>We're here to help</small>
                   </p>
                 </div>
+
               </section>
 
               <section className="content-section" id="cuisines">
@@ -615,6 +1044,71 @@ function App() {
                 </div>
               </section>
 
+              <section className="content-section" id="restaurants">
+                <div className="section-heading compact-heading">
+                  <div>
+                    <h2>Discover Restaurants</h2>
+                    <p>Explore restaurants and discover your next favourite meal.</p>
+                  </div>
+                </div>
+
+                <div className="restaurant-location">
+                  <label htmlFor="restaurant-city">Choose a city</label>
+
+                  <select
+                    id="restaurant-city"
+                    value={restaurantCity}
+                    onChange={(event) => setRestaurantCity(event.target.value)}
+                  >
+                    <option value="chennai">Chennai</option>
+                    <option value="madurai">Madurai</option>
+                    <option value="coimbatore">Coimbatore</option>
+                    <option value="tiruchirappalli">Tiruchirappalli</option>
+                    <option value="salem">Salem</option>
+                    <option value="bengaluru">Bengaluru</option>
+                  </select>
+                </div>
+
+                {restaurantsLoading ? (
+                  <p className="restaurant-message">
+                    Finding delicious restaurants...
+                  </p>
+                ) : restaurantError ? (
+                  <div className="restaurant-message restaurant-error">
+                    <p>{restaurantError}</p>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => setRestaurantCity((city) => city)}
+                    >
+                      Try again
+                    </button>
+                  </div>
+                ) : restaurants.length === 0 ? (
+                  <p className="restaurant-message">
+                    No restaurants were found for this city.
+                  </p>
+                ) : (
+                  <>
+                    <p className="restaurant-result-count">
+                      {restaurants.length} restaurants found
+                    </p>
+
+                    <div className="restaurant-grid">
+                      {restaurants.map((restaurant) => (
+                        <RestaurantCard
+                          key={restaurant.id}
+                          restaurant={restaurant}
+                          onClick={() => {
+                            setSelectedRestaurant(restaurant)
+                            setActiveView('restaurant-menu')
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </>
+                )}
+              </section>
               <section className="content-section" id="menu">
                 <div className="section-heading compact-heading">
                   <div>
@@ -752,6 +1246,54 @@ function App() {
                 </div>
               </footer>
             </>
+                    ) : activeView === 'restaurant-menu' ? (
+            <section className="content-section shopping-view">
+              <button
+                type="button"
+                className="text-link"
+                onClick={() => setActiveView('home')}
+              >
+                ← Back to restaurants
+              </button>
+
+              <div className="shopping-heading">
+                <span className="eyebrow">EXPLORE THE MENU</span>
+                <h1>{selectedRestaurant?.name ?? 'Restaurant Menu'}</h1>
+                <p>{selectedRestaurant?.cuisines.join(' · ')}</p>
+              </div>
+
+              {menuLoading ? (
+                <p className="restaurant-message">
+                  Loading restaurant menu...
+                </p>
+              ) : menuError ? (
+                <p className="restaurant-message restaurant-error">
+                  {menuError}
+                </p>
+              ) : restaurantMenu.length === 0 ? (
+                <p className="restaurant-message">
+                  No menu items are available for this restaurant.
+                </p>
+              ) : (
+                Array.from(
+                  new Set(restaurantMenu.map((food) => food.category))
+                ).map((category) => (
+                  <section className="content-section" key={category}>
+                    <div className="section-heading compact-heading">
+                      <div>
+                        <h2>{category}</h2>
+                      </div>
+                    </div>
+
+                    {renderFoodCards(
+                      restaurantMenu.filter(
+                        (food) => food.category === category
+                      )
+                    )}
+                  </section>
+                ))
+              )}
+            </section>
           ) : (
             <section className="content-section shopping-view">
               <button

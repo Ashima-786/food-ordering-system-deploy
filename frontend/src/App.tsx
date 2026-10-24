@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import './App.css'
 
@@ -7,7 +7,7 @@ type Food = {
   name: string
   category: string
   price: number
-  emoji: string
+  emoji?: string
   image?: string
   description: string
   rating: string
@@ -21,6 +21,7 @@ type ActiveView =
   | 'all-foods'
   | 'restaurants'
   | 'restaurant-menu'
+  | 'orders'
 
 type Restaurant = {
   id: string
@@ -182,7 +183,7 @@ function FoodCard({
           />
         ) : (
           <span className="food-image-placeholder" aria-label={food.name}>
-            {food.emoji}
+            {food.emoji ?? '🍽️'}
           </span>
         )}
 
@@ -368,6 +369,15 @@ function App() {
   const [restaurantError, setRestaurantError] = useState('')
   const [selectedRestaurant, setSelectedRestaurant] =
     useState<Restaurant | null>(null)
+  const [checkoutOpen, setCheckoutOpen] = useState(false)
+  const [customerName, setCustomerName] = useState('')
+  const [customerEmail, setCustomerEmail] = useState('')
+  const [deliveryAddress, setDeliveryAddress] = useState('')
+  const [orderSubmitting, setOrderSubmitting] = useState(false)
+  const [orderSuccess, setOrderSuccess] = useState<any | null>(null)
+  const [orderError, setOrderError] = useState('')
+  const [userOrders, setUserOrders] = useState<any[]>([])
+  const [ordersLoading, setOrdersLoading] = useState(false)
     
 useEffect(() => {
   let cancelled = false
@@ -426,8 +436,8 @@ useEffect(() => {
       const data = await response.json()
 
       const menuFoods: Food[] = (data.sections ?? []).flatMap(
-        (section: any, sectionIndex: number) =>
-          (section.items ?? []).map((item: any, itemIndex: number) => {
+        (section: any) =>
+          (section.items ?? []).map((item: any) => {
             // Create a consistent numeric ID for the cart.
             const id = Array.from(
               `${selectedRestaurant!.id}-${item.dish ?? item.name}`
@@ -571,6 +581,103 @@ const subtotal = cartItems.reduce(
 
   const openCart = () => setCartOpen(true)
 
+  const loadUserOrders = async () => {
+    const token = localStorage.getItem('zestora_token')
+    if (!token) return
+    setOrdersLoading(true)
+    try {
+      const res = await fetch('/api/orders', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (res.ok) {
+        setUserOrders(await res.json())
+      }
+    } catch {
+      // ignore
+    } finally {
+      setOrdersLoading(false)
+    }
+  }
+
+  const handlePlaceOrder = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!customerName.trim() || !customerEmail.trim() || !deliveryAddress.trim()) {
+      setOrderError('Please enter your name, email and delivery address.')
+      return
+    }
+
+    setOrderSubmitting(true)
+    setOrderError('')
+
+    try {
+      let token = localStorage.getItem('zestora_token')
+      if (!token) {
+        const regRes = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: customerName.trim(),
+            email: customerEmail.trim().toLowerCase(),
+            password: 'guestPassword123',
+          }),
+        })
+        const regData = await regRes.json()
+        if (regRes.ok && regData.token) {
+          token = regData.token
+          localStorage.setItem('zestora_token', token as string)
+        } else if (regRes.status === 409) {
+          const loginRes = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: customerEmail.trim().toLowerCase(),
+              password: 'guestPassword123',
+            }),
+          })
+          const loginData = await loginRes.json()
+          if (loginRes.ok && loginData.token) {
+            token = loginData.token
+            localStorage.setItem('zestora_token', token as string)
+          }
+        }
+      }
+
+      if (!token) {
+        throw new Error('Could not authenticate. Please check your email.')
+      }
+
+      const items = cartItems.map((item) => ({
+        name: item.name,
+        price: item.price,
+        quantity: cart[item.id] ?? 1,
+      }))
+
+      const orderRes = await fetch('/api/orders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          items,
+          address: deliveryAddress.trim(),
+        }),
+      })
+
+      const orderData = await orderRes.json()
+      if (!orderRes.ok) {
+        throw new Error(orderData.error || 'Failed to place order.')
+      }
+
+      setOrderSuccess(orderData)
+      setCart({})
+    } catch (err: any) {
+      setOrderError(err.message || 'Something went wrong while placing your order.')
+    } finally {
+      setOrderSubmitting(false)
+    }
+  }
+
   const renderFoodCards = (items: Food[]) => (
     <div className="food-grid">
       {items.map((food) => (
@@ -636,6 +743,22 @@ const subtotal = cartItems.reduce(
           >
             <span>{favorites.length > 0 ? '♥' : '♡'}</span>
             <small>Favorites ({favorites.length})</small>
+          </button>
+
+          <button
+            type="button"
+            className={`nav-action-button ${
+              activeView === 'orders' ? 'nav-action-selected' : ''
+            }`}
+            onClick={() => {
+              setCartOpen(false)
+              setActiveView('orders')
+              loadUserOrders()
+              window.scrollTo({ top: 0, behavior: 'smooth' })
+            }}
+          >
+            <span>📋</span>
+            <small>My Orders</small>
           </button>
 
           <button
@@ -1294,6 +1417,93 @@ const subtotal = cartItems.reduce(
                 ))
               )}
             </section>
+          ) : activeView === 'orders' ? (
+            <section className="content-section orders-container">
+              <button
+                type="button"
+                className="text-link"
+                onClick={returnHome}
+              >
+                ← Back to Menu
+              </button>
+
+              <div className="shopping-heading">
+                <span className="eyebrow">ORDER HISTORY</span>
+                <h1>My Orders</h1>
+                <p>Track your recent food deliveries.</p>
+              </div>
+
+              {ordersLoading ? (
+                <p>Loading your orders...</p>
+              ) : userOrders.length === 0 ? (
+                <div className="shopping-empty">
+                  <span>📦</span>
+                  <h2>No orders placed yet.</h2>
+                  <p>Discover tasty food and order in seconds!</p>
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={returnHome}
+                  >
+                    Discover Dishes →
+                  </button>
+                </div>
+              ) : (
+                <div className="orders-list">
+                  {userOrders.map((ord: any) => (
+                    <div key={ord._id} className="order-history-card">
+                      <div className="order-card-header">
+                        <div>
+                          <strong>Order #{ord._id.slice(-6).toUpperCase()}</strong>
+                          <br />
+                          <small style={{ color: '#888' }}>
+                            {new Date(ord.created_at).toLocaleString()}
+                          </small>
+                        </div>
+                        <span
+                          className={`order-status-badge order-status-${ord.status}`}
+                        >
+                          {ord.status}
+                        </span>
+                      </div>
+
+                      <div style={{ margin: '12px 0' }}>
+                        {ord.items?.map((it: any, idx: number) => (
+                          <div
+                            key={idx}
+                            style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              margin: '4px 0',
+                            }}
+                          >
+                            <span>
+                              {it.quantity}x {it.name}
+                            </span>
+                            <strong>₹{it.subtotal || it.price * it.quantity}</strong>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div
+                        style={{
+                          borderTop: '1px dashed #eee',
+                          paddingTop: '10px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          fontWeight: 'bold',
+                        }}
+                      >
+                        <span>Delivery to: {ord.address}</span>
+                        <span style={{ color: 'var(--orange, #ed650e)' }}>
+                          Total: ₹{ord.total}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
           ) : (
             <section className="content-section shopping-view">
               <button
@@ -1479,11 +1689,12 @@ const subtotal = cartItems.reduce(
                   <button
                     type="button"
                     className="primary-button cart-checkout"
-                    onClick={() =>
-                      window.alert(
-                        'Checkout will be connected to the Python backend later.',
-                      )
-                    }
+                    onClick={() => {
+                      setCartOpen(false)
+                      setCheckoutOpen(true)
+                      setOrderSuccess(null)
+                      setOrderError('')
+                    }}
                   >
                     Proceed to Checkout →
                   </button>
@@ -1495,6 +1706,132 @@ const subtotal = cartItems.reduce(
               </>
             )}
           </aside>
+        </div>
+      )}
+
+      {checkoutOpen && (
+        <div
+          className="checkout-modal-overlay"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && !orderSubmitting) {
+              setCheckoutOpen(false)
+            }
+          }}
+        >
+          <div className="checkout-modal" role="dialog" aria-modal="true">
+            <div className="checkout-header">
+              <h2>{orderSuccess ? 'Order Confirmed! 🎉' : 'Checkout & Delivery'}</h2>
+              <button
+                type="button"
+                className="checkout-close"
+                onClick={() => setCheckoutOpen(false)}
+                aria-label="Close checkout"
+              >
+                ×
+              </button>
+            </div>
+
+            {orderSuccess ? (
+              <div className="checkout-success-view">
+                <div className="success-badge">✓</div>
+                <h3>Thank you, {customerName}!</h3>
+                <p>Your meal is being prepared with love.</p>
+                <div className="order-badge-id">
+                  Order ID: <strong>{orderSuccess._id}</strong>
+                </div>
+                <p style={{ color: '#666', fontSize: '0.9rem' }}>
+                  Delivering to: <strong>{orderSuccess.address}</strong>
+                </p>
+                <div style={{ marginTop: '24px', display: 'flex', gap: '12px', justifyContent: 'center' }}>
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={() => {
+                      setCheckoutOpen(false)
+                      setActiveView('orders')
+                      loadUserOrders()
+                    }}
+                  >
+                    View My Orders
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => {
+                      setCheckoutOpen(false)
+                      returnHome()
+                    }}
+                  >
+                    Back to Home
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handlePlaceOrder}>
+                {orderError && <div className="checkout-error">{orderError}</div>}
+
+                <div className="form-group">
+                  <label htmlFor="customer-name">Full Name</label>
+                  <input
+                    id="customer-name"
+                    type="text"
+                    required
+                    placeholder="e.g. Alice Test"
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="customer-email">Email Address</label>
+                  <input
+                    id="customer-email"
+                    type="email"
+                    required
+                    placeholder="e.g. alice@example.com"
+                    value={customerEmail}
+                    onChange={(e) => setCustomerEmail(e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="delivery-address">Delivery Address</label>
+                  <textarea
+                    id="delivery-address"
+                    rows={3}
+                    required
+                    placeholder="e.g. Apt 4B, 123 Baker Street, City"
+                    value={deliveryAddress}
+                    onChange={(e) => setDeliveryAddress(e.target.value)}
+                  />
+                </div>
+
+                <div className="checkout-summary-box">
+                  <div className="checkout-summary-row">
+                    <span>Items ({cartCount})</span>
+                    <span>₹{subtotal}</span>
+                  </div>
+                  <div className="checkout-summary-row">
+                    <span>Delivery Fee</span>
+                    <span>{deliveryFee === 0 ? 'FREE' : `₹${deliveryFee}`}</span>
+                  </div>
+                  <div className="checkout-summary-row total">
+                    <span>Total Amount</span>
+                    <span>₹{total}</span>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  className="primary-button"
+                  style={{ width: '100%', padding: '14px', fontSize: '1rem' }}
+                  disabled={orderSubmitting || cartItems.length === 0}
+                >
+                  {orderSubmitting ? 'Placing Order...' : `Confirm & Place Order (₹${total})`}
+                </button>
+              </form>
+            )}
+          </div>
         </div>
       )}
     </div>

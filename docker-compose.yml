@@ -1,0 +1,80 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Zestora – Online Food Ordering System
+#  Services: frontend (React/Nginx)  •  backend (Flask)  •  mongo (MongoDB)
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── MongoDB ──────────────────────────────────────────────────────────────────
+  mongo:
+    image: mongo:7.0
+    container_name: zestora_mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: zestora
+    volumes:
+      - mongo_data:/data/db
+      - ./database/init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+    networks:
+      - zestora_net
+    healthcheck:
+      test: [ "CMD", "mongosh", "--eval", "db.adminCommand('ping')" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    # Do NOT expose port 27017 externally in production; for local dev uncomment:
+    # ports:
+    #   - "27017:27017"
+
+    # ── Flask Backend ─────────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: zestora_backend
+    restart: unless-stopped
+    environment:
+      MONGO_URI: mongodb://mongo:27017/zestora
+      JWT_SECRET: ${JWT_SECRET:-zestora_change_me_in_production}
+      FLASK_ENV: production
+    ports:
+      - "5000:5000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - zestora_net
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/health')" ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── React Frontend ────────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:5000
+    container_name: zestora_frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3001}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - zestora_net
+
+# ─── Volumes ──────────────────────────────────────────────────────────────────
+volumes:
+  mongo_data:
+    driver: local
+
+# ─── Networks ─────────────────────────────────────────────────────────────────
+networks:
+  zestora_net:
+    driver: bridge

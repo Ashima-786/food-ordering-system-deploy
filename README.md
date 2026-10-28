@@ -1,322 +1,207 @@
-# 🍔 Zestora – Online Food Ordering System
+# 🍔 Zestora – DevOps & Cloud Architecture
 
-A full-stack food ordering platform built with **React + TypeScript**, **Flask**, and **MongoDB**, containerised with **Docker** and **Docker Compose**, and deployed on a zero-cost single-instance **AWS EC2 architecture**.
+> A containerised, micro-tier food ordering platform built with **React TypeScript**, **Flask**, and **MongoDB**, deployed on a hardened single-instance **AWS EC2 architecture** with a **$0.00 Free Tier footprint** and automated 10-day lifecycle management.
 
-🌐 **Live Production Deployment:** [http://54.234.169.116](http://54.234.169.116)
-
----
-
-## ✨ Key Features
-
-- **Authentic Tamil & South Indian Cuisine:** Ambur Chicken Dum Biryani, Madurai Bun Parotta & Salna, Chicken Kothu Parotta, Dindigul Mutton Biryani, Chettinad Pepper Chicken Fry, Ghee Podi Roast Dosa, and Kumbakonam Degree Filter Coffee.
-- **Instant Live Search Dropdown:** Real-time dish matching across names, categories, descriptions, and tags with 1-click cart addition.
-- **Promo Coupon System:** Dynamic promo code validation engine (`AWS20` for 20% off, `CLOUD50` for ₹50 off, `FREEDEL` for free delivery).
-- **Real-Time 4-Step Order Tracking:** Live order stepper timeline (Confirmed ➔ Kitchen Preparing ➔ Out for Delivery ➔ Delivered) with simulated status advance.
-- **Kitchen Display System (KDS):** Real-time admin kitchen dashboard displaying active orders, revenue metrics, and 1-click fulfillment toggles.
-- **Customer Reviews & Ratings:** 1–5 star interactive review modal for all dishes.
-- **Zero-Cost AWS EC2 Architecture:** Deployed strictly within AWS Free Tier on a single `t3.micro` instance with 2GB swap and a 10-day auto-destruction safety timer.
-- **Automated Test Suite:** 12 automated unit and integration tests covering auth, catalog, orders, coupons, tracking, reviews, and admin APIs.
+🌐 **Live Production Deployment:** [http://54.234.169.116](http://54.234.169.116)  
+📋 **System Architecture Guide:** [SYSTEM_ARCHITECTURE.md](file:///d:/Projects/AWS_Project/SYSTEM_ARCHITECTURE.md)  
+⚙️ **DevOps Deep Dive:** [DEVOPS_ARCHITECTURE.md](file:///d:/Projects/AWS_Project/DEVOPS_ARCHITECTURE.md)  
 
 ---
 
-## 🏗️ Architecture
+## 🏗️ DevOps & Cloud Architecture
 
+```mermaid
+flowchart TD
+    subgraph ClientLayer["Edge & Ingress (Public Internet)"]
+        Browser["User Browser / Admin Staff"]
+    end
+
+    subgraph AWSCloud["AWS EC2 Host (Ubuntu 24.04 LTS | t3.micro | 54.234.169.116)"]
+        subgraph HostOS["Host Resources & Safeguards"]
+            RAM["Physical RAM: 1 GB"]
+            Swap["Swap Space: 2 GB (/swapfile)"]
+            Timer["10-Day Auto-Shutdown Safety Timer"]
+        end
+
+        subgraph DockerBridge["Docker Network (zestora_net - 172.28.0.0/16)"]
+            Frontend["zestora_frontend_prod<br/>(Nginx 1.27 + React SPA)<br/>Host Port 80 -> Container 3000"]
+            Backend["zestora_backend_prod<br/>(Flask + Gunicorn WSGI)<br/>Container Port 5000 (Internal)"]
+            Mongo["zestora_mongo_prod<br/>(MongoDB 7.0 Community)<br/>Container Port 27017 (Internal)"]
+        end
+
+        Storage[("Persistent EBS gp3 Volume<br/>delete_on_termination = true")]
+    end
+
+    Browser -->|HTTP Port 80| Frontend
+    Frontend -->|Static Files / SPA Routing| Frontend
+    Frontend -->|Reverse Proxy /api/*| Backend
+    Backend -->|mongodb://mongo:27017| Mongo
+    Mongo --- Storage
 ```
-┌────────────────────────────────────────┐
-│           Docker Network (bridge)      │
-│                                        │
-│  ┌──────────────┐   ┌───────────────┐  │
-│  │   Frontend   │   │    Backend    │  │
-│  │  React/Nginx │──►│    Flask      │  │
-│  │  port: 3000  │   │  port: 5000   │  │
-│  └──────────────┘   └──────┬────────┘  │
-│                            │           │
-│                    ┌───────▼────────┐  │
-│                    │    MongoDB     │  │
-│                    │  port: 27017   │  │
-│                    └────────────────┘  │
-└────────────────────────────────────────┘
-```
-
-| Service    | Image / Build                 | Port |
-|------------|-------------------------------|------|
-| `frontend` | Build from `./frontend`       | 3000 |
-| `backend`  | Build from `./backend`        | 5000 |
-| `mongo`    | `mongo:7.0` (official image)  | —    |
 
 ---
 
-## 🚀 Quick Start
+## 🎯 Key DevOps Features & Engineering Highlights
 
-### Prerequisites
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) ≥ 24
-- [Docker Compose](https://docs.docker.com/compose/) (bundled with Docker Desktop)
+| Feature | DevOps Implementation | Benefit |
+|---------|-----------------------|---------|
+| **Zero Cost Architecture** | 100% within AWS Free Tier (No NAT GW, No Elastic IP, No ALB) | **$0.00 / month cost** |
+| **Memory Engineering** | 2 GB swap space (`/swapfile`, `vm.swappiness=10`) | Prevents OOM kills during Docker builds |
+| **Self-Destruction Timer** | `shutdown -h +14400` in `ec2-user-data.sh` | Guarantees automatic shutoff after 10 days |
+| **Multi-Stage Builds** | Frontend (`node:20` ➔ `nginx:1.27`), Backend (`python:3.12-slim`) | Tiny image sizes (<35 MB frontend, <180 MB backend) |
+| **Network Isolation** | Private Docker bridge network `zestora_net` | Backend & Mongo are never exposed to the public Internet |
+| **Cache Invalidation** | `Cache-Control: no-cache, no-store, must-revalidate` on `index.html` | Eliminates stale client asset bugs after redeployment |
+| **Health Checks** | Native HTTP health endpoints (`/healthz` and `/api/health`) | Docker automatic restart and container monitoring |
+| **Automated Testing** | 12 automated unit and integration tests | 100% pass rate in CI & production containers |
 
-### 1. Clone & configure
+---
+
+## 🚀 Quick Start (DevOps Runbook)
+
+### 1. Local Development (Docker Compose)
+Clone the repository and spin up all three microservices in development mode:
 
 ```bash
+# Clone the repository
 git clone https://github.com/VenuGopalops/online-food-ordering.git
 cd online-food-ordering
 
-# Copy and edit environment variables
+# Copy environment variables
 cp .env.example .env
-# Edit .env and set a strong JWT_SECRET
+
+# Build and start containers in detached mode
+docker compose up --build -d
+
+# Verify container status
+docker compose ps
 ```
 
-### 2. Build & start all services
-
-```bash
-docker compose up --build
-```
-
-First run takes ~3–5 minutes to pull images and build.
-
-### 3. Seed the database
-
-```bash
-curl -X POST http://localhost:5000/api/seed
-```
-
-### 4. Open the app
-
-| URL                              | Description         |
-|----------------------------------|---------------------|
-| http://localhost:3000            | React frontend      |
-| http://localhost:5000/api/health | Backend health check|
+* **Frontend UI:** `http://localhost:3000`
+* **Backend Health Check:** `http://localhost:5000/api/health`
+* **Seed Database:** `curl -X POST http://localhost:5000/api/seed?force=true`
 
 ---
 
-## 🧪 Test an Order (curl)
+### 2. Production EC2 Deployment (Direct Secure SSH)
+To deploy updates directly to the live AWS EC2 server:
 
-### Register a user
-```bash
-curl -X POST http://localhost:5000/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Alice","email":"alice@example.com","password":"secret123"}'
-```
+```powershell
+# 1. Copy updated source code to EC2 via SCP
+scp -i adm.pem -o StrictHostKeyChecking=no frontend/src/App.tsx frontend/src/App.css ubuntu@54.234.169.116:/home/ubuntu/app/frontend/src/
 
-### Login and capture token
-```bash
-TOKEN=$(curl -s -X POST http://localhost:5000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"alice@example.com","password":"secret123"}' | \
-  python -c "import sys,json; print(json.load(sys.stdin)['token'])")
+# 2. Rebuild and launch containers on EC2
+ssh -i adm.pem -o StrictHostKeyChecking=no ubuntu@54.234.169.116 "cd /home/ubuntu/app && sudo docker compose -f docker-compose.prod.yml up -d --build"
 
-echo "Token: $TOKEN"
-```
-
-### Browse foods
-```bash
-curl http://localhost:5000/api/foods
-curl "http://localhost:5000/api/foods?category=Indian"
-```
-
-### Place an order
-```bash
-curl -X POST http://localhost:5000/api/orders \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{
-    "items": [
-      {"name":"Margherita Pizza","price":249,"quantity":2},
-      {"name":"Paneer Butter Masala","price":229,"quantity":1}
-    ],
-    "address": "42, Baker Street, Mumbai"
-  }'
-```
-
-### List my orders
-```bash
-curl http://localhost:5000/api/orders \
-  -H "Authorization: Bearer $TOKEN"
+# 3. Seed the live database with authentic Tamil cuisine
+ssh -i adm.pem -o StrictHostKeyChecking=no ubuntu@54.234.169.116 "curl -s -X POST 'http://localhost/api/seed?force=true'"
 ```
 
 ---
 
-## 📁 Project Structure
+## 🧪 Automated Testing & Quality Assurance
+
+The backend includes a comprehensive automated test suite testing user authentication, food catalog, order creation, coupon validation, live tracking, reviews, and admin metrics.
+
+### Run Tests Inside the Production Docker Container:
+```bash
+ssh -i adm.pem ubuntu@54.234.169.116 \
+  "sudo docker compose -f /home/ubuntu/app/docker-compose.prod.yml exec backend python -m unittest test_app.py"
+```
+
+```text
+............
+----------------------------------------------------------------------
+Ran 12 tests in 2.054s
+
+OK
+```
+
+---
+
+## 💰 AWS Cost Analysis ($0.00 Free Tier Budget)
+
+| AWS Resource | Allocated Tier | Monthly Usage | Cost |
+|--------------|----------------|---------------|------|
+| **EC2 Compute** | `t3.micro` (1 vCPU, 1 GB RAM) | 750 hours (Free Tier) | **$0.00** |
+| **EBS Storage** | 20 GB gp3 (`delete_on_termination=true`) | 30 GB (Free Tier) | **$0.00** |
+| **Elastic IP** | None (uses default public IP) | Bypasses AWS $0.005/hr IPv4 charge | **$0.00** |
+| **Bandwidth** | Internet Egress | < 5 GB (100 GB Free Tier) | **$0.00** |
+| **VPC Infrastructure** | Default AWS VPC | Standard VPC features | **$0.00** |
+| **Total Estimated Cost** | | | **$0.00** |
+
+---
+
+## 📁 Repository Structure
 
 ```
-online-food-ordering/
+AWS_Project/
+├── SYSTEM_ARCHITECTURE.md        # Comprehensive multi-tier system architecture
+├── DEVOPS_ARCHITECTURE.md        # DevOps, memory management, and cost breakdown
+├── README.md                     # DevOps-centric project documentation
+├── docker-compose.yml            # Local development orchestration
+├── docker-compose.prod.yml       # Hardened production orchestration (port 80, limits)
+├── ec2-user-data.sh              # Cloud-init bootstrap script (swap, docker, 10-day timer)
 ├── backend/
-│   ├── app.py              # Flask application (all API routes)
-│   ├── requirements.txt    # Python dependencies
-│   ├── Dockerfile          # Multi-stage Flask Docker image
-│   └── .dockerignore
-│
+│   ├── app.py                    # Flask REST API engine
+│   ├── test_app.py               # 12 automated unit and integration tests
+│   ├── requirements.txt          # Python dependencies (gunicorn, pymongo, etc.)
+│   └── Dockerfile                # Multi-stage non-root Python runtime
 ├── frontend/
 │   ├── src/
-│   │   ├── App.tsx         # Main app component
-│   │   ├── App.css         # Styles
-│   │   ├── main.tsx        # React entry point
-│   │   └── pages/
-│   │       ├── SignIn.tsx
-│   │       ├── SignUp.tsx
-│   │       └── SignIn.css
-│   ├── Dockerfile          # Multi-stage React/Nginx image
-│   ├── nginx.conf          # Nginx config with SPA + API proxy
-│   ├── vite.config.ts
-│   └── .dockerignore
-│
-├── database/
-│   └── init-mongo.js       # MongoDB init script
-│
-├── docker-compose.yml      # Orchestrates all three services
-├── .env.example            # Environment variable template
-└── README.md
+│   │   ├── App.tsx               # Main React SPA with Tamil catalog, KDS, & live search
+│   │   ├── App.css               # Responsive design, theme styling, animations
+│   │   └── main.tsx              # React entry point
+│   ├── public/images/            # High-resolution dish photos & local fallbacks
+│   ├── nginx.conf                # Nginx proxy config with uncached HTML headers
+│   └── Dockerfile                # Multi-stage Node.js build to Nginx Alpine
+└── scripts/
+    ├── deploy.sh                 # Local container deployment script
+    └── update-live-ec2.sh        # Direct SSH/SCP deployment helper
 ```
 
 ---
 
-## 🔌 API Reference
+## 📡 Core API Reference
 
-### Authentication
-
-| Method | Endpoint               | Auth | Description        |
-|--------|------------------------|------|--------------------|
-| POST   | `/api/auth/register`   | No   | Create account     |
-| POST   | `/api/auth/login`      | No   | Login → JWT token  |
-| GET    | `/api/auth/me`         | Yes  | Current user info  |
-
-### Foods
-
-| Method | Endpoint               | Auth | Description              |
-|--------|------------------------|------|--------------------------|
-| GET    | `/api/foods`           | No   | List all foods           |
-| GET    | `/api/foods?category=` | No   | Filter by category       |
-| GET    | `/api/foods/:id`       | No   | Get single food item     |
-| POST   | `/api/foods`           | No   | Add food item (admin)    |
-
-### Orders
-
-| Method | Endpoint                    | Auth | Description        |
-|--------|-----------------------------|------|--------------------|
-| POST   | `/api/orders`               | Yes  | Place new order    |
-| GET    | `/api/orders`               | Yes  | My order history   |
-| GET    | `/api/orders/:id`           | Yes  | Order detail       |
-| PATCH  | `/api/orders/:id/cancel`    | Yes  | Cancel an order    |
-
-### Utility
-
-| Method | Endpoint                    | Description                                  |
-|--------|-----------------------------|----------------------------------------------|
-| GET    | `/api/health`               | Service health check                         |
-| POST   | `/api/seed?force=true`      | Seed DB with authentic Tamil & Indian foods  |
-
-### Promo Coupons
-
-| Method | Endpoint                | Description                                  |
-|--------|-------------------------|----------------------------------------------|
-| POST   | `/api/coupons/validate` | Validate promo codes (`AWS20`, `CLOUD50`, `FREEDEL`) |
-
-### Live Order Tracking & Management
-
-| Method | Endpoint                     | Description                                  |
-|--------|------------------------------|----------------------------------------------|
-| GET    | `/api/orders/:id/track`      | 4-step live order tracking timeline & ETA    |
-| PATCH  | `/api/orders/:id/status`     | Advance order status (`preparing`, `delivered`) |
-
-### Customer Reviews & Ratings
-
-| Method | Endpoint                     | Description                                  |
-|--------|------------------------------|----------------------------------------------|
-| GET    | `/api/foods/:id/reviews`     | Get all customer reviews for a food item     |
-| POST   | `/api/foods/:id/reviews`     | Submit a new review and 1–5 star rating      |
-
-### Kitchen Display System (KDS / Admin)
-
-| Method | Endpoint                     | Description                                  |
-|--------|------------------------------|----------------------------------------------|
-| GET    | `/api/admin/stats`           | Get total revenue, orders, and fulfillment   |
-| GET    | `/api/admin/orders`          | List active kitchen orders for fulfillment   |
+| Method | Endpoint | Auth | Description |
+|:-------|:---------|:-----|:------------|
+| `GET` | `/healthz` | No | Edge Nginx health check |
+| `GET` | `/api/health` | No | Backend & MongoDB health check |
+| `GET` | `/api/foods` | No | List food items (supports `?category=`) |
+| `POST` | `/api/seed?force=true` | No | Re-seed catalog with authentic Tamil cuisine |
+| `POST` | `/api/coupons/validate` | No | Validate promo discounts (`AWS20`, `CLOUD50`) |
+| `POST` | `/api/orders` | Yes | Place order (JWT authenticated) |
+| `GET` | `/api/orders/:id/track` | No | 4-step live order tracking timeline |
+| `PATCH`| `/api/orders/:id/status` | No | Advance order status (`preparing`, `delivered`)|
+| `GET` | `/api/admin/stats` | No | Kitchen KDS revenue and order metrics |
+| `POST` | `/api/foods/:id/reviews` | No | Submit 1–5 star customer review |
 
 ---
 
-## 🐳 Individual Docker Builds
+## 🛠️ Operational Maintenance Commands
 
 ```bash
-# Build Flask backend only
-docker build -t zestora-backend ./backend
+# View live container status
+sudo docker compose -f docker-compose.prod.yml ps
 
-# Build React frontend only
-docker build -t zestora-frontend ./frontend
+# View real-time resource utilization (CPU / RAM)
+sudo docker stats --no-stream
 
-# Run just MongoDB
-docker run -d -p 27017:27017 --name mongo mongo:7.0
+# View real-time application logs
+sudo docker compose -f docker-compose.prod.yml logs -f --tail=100 backend
+
+# Restart individual container
+sudo docker compose -f docker-compose.prod.yml restart backend
+
+# Access container shell for debugging
+sudo docker compose -f docker-compose.prod.yml exec backend sh
 ```
 
 ---
 
-## 🔧 Development Mode (without Docker)
+## 🔒 Security Posture
 
-### Backend
-```bash
-cd backend
-python -m venv venv
-# Windows:
-venv\Scripts\activate
-# macOS/Linux:
-source venv/bin/activate
-
-pip install -r requirements.txt
-MONGO_URI=mongodb://localhost:27017/zestora python app.py
-```
-
-### Frontend
-```bash
-cd frontend
-npm install
-npm run dev       # http://localhost:5173
-```
-
-> API calls from `localhost:5173` are automatically proxied to `localhost:5000` via `vite.config.ts`.
-
----
-
-## ⚙️ Useful Commands
-
-```bash
-# Start in detached mode
-docker compose up -d --build
-
-# View logs
-docker compose logs -f
-docker compose logs -f backend
-
-# Stop everything
-docker compose down
-
-# Stop and remove volumes (wipes MongoDB data)
-docker compose down -v
-
-# Restart a single service
-docker compose restart backend
-
-# Open a shell in the backend container
-docker compose exec backend sh
-
-# Open MongoDB shell
-docker compose exec mongo mongosh zestora
-```
-
----
-
-## ☁️ AWS EC2 & DevOps Architecture
-
-The repository includes a complete production-grade DevOps setup for AWS EC2:
-
-* **Direct Secure Deployment (`scripts/update-live-ec2.sh`)**: Direct, secure deployment over SSH without external runner dependencies.
-* **Infrastructure as Code (`terraform/`)**: Automated provisioning of VPC, Subnet, Security Groups, IAM, S3 backup bucket, and EC2 with Elastic IP.
-* **Production Docker Compose (`docker-compose.prod.yml`)**: Binds port 80/443 to Nginx edge proxy, enforces container CPU & memory limits, and configures Docker log rotation.
-* **Automated S3 Backups (`scripts/backup-mongo-s3.sh`)**: Dumps MongoDB and uploads compressed archives directly to Amazon S3.
-* **Auto-recovery on Reboot (`scripts/zestora.service`)**: Systemd unit to bring up the Docker Compose stack upon server start/reboot.
-
-📖 **For full deployment instructions, see [DEPLOYMENT_EC2.md](file:///d:/Projects/AWS_Project/DEPLOYMENT_EC2.md)**.
-
----
-
-## 🔒 Security Notes
-
-- Change `JWT_SECRET` in `.env` before deploying to production
-- MongoDB port is **not** exposed externally in the default config
-- Use HTTPS (reverse proxy like Traefik/Nginx) in production
-- Rotate secrets and use Docker secrets for sensitive values in production
+- **Non-Root Execution:** Flask backend executes under an unprivileged system user (`appuser`).
+- **Network Isolation:** MongoDB (`27017`) and Flask (`5000`) are accessible solely within the internal Docker bridge network.
+- **HTTP Header Hardening:** Nginx injects `X-Frame-Options: SAMEORIGIN`, `X-Content-Type-Options: nosniff`, and `X-XSS-Protection`.
+- **Stateless Tokens:** Client authentication is verified using HMAC-SHA256 signed JSON Web Tokens (JWT).

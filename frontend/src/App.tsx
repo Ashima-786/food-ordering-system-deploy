@@ -218,7 +218,7 @@ function FoodCard({
   onOpenReviews?: () => void
 }) {
   return (
-    <article className="food-card">
+    <article className="food-card" id={`food-${food.id}`}>
       <div
         className="food-art"
         style={{ backgroundColor: food.color }}
@@ -591,16 +591,41 @@ const subtotal = cartItems.reduce(
   const discountAmount = appliedCoupon ? appliedCoupon.discount : 0
   const total = Math.max(0, subtotal + deliveryFee - discountAmount)
 
+  const matchingDishes = foods.filter((food) => {
+    const q = search.trim().toLowerCase()
+    if (!q) return false
+    return (
+      food.name.toLowerCase().includes(q) ||
+      food.category.toLowerCase().includes(q) ||
+      food.description.toLowerCase().includes(q) ||
+      (food.tag && food.tag.toLowerCase().includes(q))
+    )
+  })
+
   const visibleFoods = foods.filter((food) => {
-    const matchesCategory =
-      activeCategory === 'All' || food.category === activeCategory
+    const query = search.trim().toLowerCase()
 
-    const matchesSearch =
-      `${food.name} ${food.category}`
-        .toLowerCase()
-        .includes(search.toLowerCase())
+    // 1. If searching, match across name, category, description, and tag
+    if (query) {
+      const inName = food.name.toLowerCase().includes(query)
+      const inCat = food.category.toLowerCase().includes(query)
+      const inDesc = food.description.toLowerCase().includes(query)
+      const inTag = (food.tag || '').toLowerCase().includes(query)
+      return inName || inCat || inDesc || inTag
+    }
 
-    return matchesCategory && matchesSearch
+    // 2. Category filtering when search is empty
+    if (activeCategory === 'All') return true
+    if (activeCategory === 'Indian') {
+      return food.category === 'Indian' || food.category === 'South Indian'
+    }
+    if (activeCategory === 'Tamil Nadu Special' || activeCategory === 'South Indian') {
+      return food.category === 'South Indian'
+    }
+    if (activeCategory === 'North Indian') {
+      return food.category === 'Indian'
+    }
+    return food.category.toLowerCase() === activeCategory.toLowerCase()
   })
 
   useEffect(() => {
@@ -910,7 +935,14 @@ const subtotal = cartItems.reduce(
           <span>Zestora</span>
         </a>
 
-        <label className="search-box">
+        <form
+          className="search-box"
+          onSubmit={(e) => {
+            e.preventDefault()
+            setActiveView('home')
+            document.getElementById('menu')?.scrollIntoView({ behavior: 'smooth' })
+          }}
+        >
           <span aria-hidden="true">⌕</span>
           <input
             value={search}
@@ -919,17 +951,95 @@ const subtotal = cartItems.reduce(
               setSearch(event.target.value)
               setActiveView('home')
             }}
-            placeholder="Search dishes, cuisines..."
+            placeholder="Search biryani, parotta, dosa, pizza..."
             aria-label="Search food"
           />
+          {search && (
+            <button
+              type="button"
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: '0.9rem',
+                color: '#888',
+                padding: '0 6px',
+              }}
+              onClick={() => setSearch('')}
+              title="Clear search"
+            >
+              ✕
+            </button>
+          )}
           <button
-            type="button"
+            type="submit"
             aria-label="Search menu"
-            onClick={() => showCategory(activeCategory)}
           >
             ⌕
           </button>
-        </label>
+
+          {search.trim().length > 0 && (
+            <div className="search-dropdown">
+              <div className="search-dropdown-header">
+                <span>Matching dishes ({matchingDishes.length})</span>
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  style={{ background: 'none', border: 'none', color: '#ed650e', cursor: 'pointer', fontWeight: 600 }}
+                >
+                  Clear
+                </button>
+              </div>
+              {matchingDishes.length > 0 ? (
+                <div className="search-dropdown-list">
+                  {matchingDishes.slice(0, 5).map((food) => (
+                    <div
+                      key={food.id}
+                      className="search-dropdown-item"
+                      onClick={() => {
+                        setActiveView('home')
+                        setSearch('')
+                        const el = document.getElementById(`food-${food.id}`)
+                        if (el) {
+                          el.scrollIntoView({ behavior: 'smooth' })
+                        } else {
+                          document.getElementById('menu')?.scrollIntoView({ behavior: 'smooth' })
+                        }
+                      }}
+                    >
+                      <img
+                        src={food.image}
+                        alt={food.name}
+                        onError={(e) => {
+                          e.currentTarget.onerror = null
+                          e.currentTarget.src = '/images/chickenburger.jpg'
+                        }}
+                      />
+                      <div className="search-dropdown-info">
+                        <strong>{food.name}</strong>
+                        <small>{food.category} • ₹{food.price}</small>
+                      </div>
+                      <button
+                        type="button"
+                        className="search-dropdown-add"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          addToCart(food.id)
+                        }}
+                      >
+                        + Add ₹{food.price}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="search-dropdown-empty">
+                  No dishes found matching "{search}"
+                </div>
+              )}
+            </div>
+          )}
+        </form>
 
         <nav className="nav-actions">
           <button
@@ -1223,9 +1333,12 @@ const subtotal = cartItems.reduce(
             </a>
             <img
               className="offer-image"
-              src={foods[0].image}
-              alt="Fresh grilled meal"
+              src={foods[0]?.image || 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?auto=format&fit=crop&w=600&q=80'}
+              alt="Fresh meal"
               loading="lazy"
+              onError={(e) => {
+                e.currentTarget.src = 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?auto=format&fit=crop&w=600&q=80'
+              }}
             />
           </div>
         </aside>
@@ -1257,10 +1370,26 @@ const subtotal = cartItems.reduce(
 
                   <div className="hero-social-proof">
                       <span className="avatar-stack" aria-hidden="true">
-                        <img src="/images/99230041167-Ranjana Gayatri B.jpeg" alt="" />
-                        <img src="/images/ashima.jpeg" alt="" />
-                        <img src="/images/NITHEES.jpg" alt="" />
-                        <img src="/images/kasim.jpeg" alt="" />
+                        <img
+                          src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80"
+                          alt="Customer 1"
+                          onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/images/kasim.jpeg' }}
+                        />
+                        <img
+                          src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&q=80"
+                          alt="Customer 2"
+                          onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/images/ashima.jpeg' }}
+                        />
+                        <img
+                          src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=120&q=80"
+                          alt="Customer 3"
+                          onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/images/NITHEES.jpg' }}
+                        />
+                        <img
+                          src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=120&q=80"
+                          alt="Customer 4"
+                          onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/images/99230041167-Ranjana Gayatri B.jpeg' }}
+                        />
                       </span>
                       <span>
                       <strong>50K+</strong> happy food lovers
@@ -1271,9 +1400,13 @@ const subtotal = cartItems.reduce(
                 <div className="hero-visual">
                   <div className="hero-decoration" />
                   <img
-                    src="/images/chickenburger-removebg-preview.png"
+                    src="https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=800&q=80"
                     alt="Zestora featured meal"
                     className="hero-image"
+                    onError={(e) => {
+                      e.currentTarget.onerror = null
+                      e.currentTarget.src = '/images/chickenburger.jpg'
+                    }}
                   />
                   <div className="hero-food-card">
                     <strong>Today's special</strong>
@@ -1476,19 +1609,56 @@ const subtotal = cartItems.reduce(
                       className={`category-button ${
                         activeCategory === category ? 'selected' : ''
                       }`}
-                      onClick={() => setActiveCategory(category)}
+                      onClick={() => {
+                        setActiveCategory(category)
+                        setSearch('')
+                      }}
                     >
                       {category}
                     </button>
                   ))}
                 </div>
 
+                {search && (
+                  <p style={{ margin: '14px 0', fontSize: '0.92rem', color: '#6b6055' }}>
+                    Showing results for "<strong>{search}</strong>" ({visibleFoods.length} dishes found)
+                    <button
+                      type="button"
+                      onClick={() => setSearch('')}
+                      style={{
+                        marginLeft: '12px',
+                        background: 'none',
+                        border: 'none',
+                        color: '#ed650e',
+                        cursor: 'pointer',
+                        fontWeight: 700,
+                      }}
+                    >
+                      ✕ Clear search
+                    </button>
+                  </p>
+                )}
+
                 {visibleFoods.length > 0 ? (
                   renderFoodCards(visibleFoods)
                 ) : (
-                  <p className="empty-state">
-                    No dishes found. Try another search or category.
-                  </p>
+                  <div className="empty-state" style={{ padding: '40px 20px', textAlign: 'center' }}>
+                    <span style={{ fontSize: '2.5rem' }}>🍽️</span>
+                    <p style={{ marginTop: '10px', fontWeight: 600, color: '#666' }}>
+                      No dishes found for this selection.
+                    </p>
+                    <button
+                      type="button"
+                      className="primary-button"
+                      style={{ marginTop: '12px' }}
+                      onClick={() => {
+                        setActiveCategory('All')
+                        setSearch('')
+                      }}
+                    >
+                      Show All Dishes
+                    </button>
+                  </div>
                 )}
               </section>
 

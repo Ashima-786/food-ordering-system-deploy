@@ -25,6 +25,9 @@ RUN rm -rf /usr/share/nginx/html/*
 # Copy built React app
 COPY --from=builder /app/dist /usr/share/nginx/html
 
+# Copy static images explicitly
+COPY --from=builder /app/images /usr/share/nginx/html/images
+
 # Custom nginx config for SPA routing (react-router)
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 

@@ -479,29 +479,73 @@ def health():
 @app.route("/api/seed", methods=["POST"])
 def seed():
     """Seed the DB with sample food items -- call once after first launch."""
-    if foods_col.count_documents({}) > 0:
-        return jsonify({"message": "DB already seeded"}), 200
+    force = request.args.get("force", "false").lower() == "true" or (request.get_json(silent=True) or {}).get("force", False)
+    if foods_col.count_documents({}) > 0 and not force:
+        return jsonify({"message": "DB already seeded. Pass ?force=true to re-seed."}), 200
+
+    if force:
+        foods_col.delete_many({})
 
     sample_foods = [
         {
-            "name": "Grilled Chicken with Veggies",
-            "category": "Healthy",
-            "price": 299,
-            "image": "/images/grilled chicken.jpg",
-            "description": "Grilled chicken with fresh garden vegetables",
-            "rating": "4.8",
-            "tag": "Bestseller",
-            "color": "#e9f1df",
+            "name": "Ambur Chicken Dum Biryani",
+            "category": "South Indian",
+            "price": 279,
+            "image": "https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?auto=format&fit=crop&w=900&q=85",
+            "description": "Aromatic Seeraga Samba rice cooked with tender spiced chicken, mint & boiled egg in traditional Ambur style",
+            "rating": "4.9",
+            "tag": "Tamil Bestseller ⭐",
+            "color": "#fff1dc",
         },
         {
-            "name": "Margherita Pizza",
-            "category": "Italian",
+            "name": "Madurai Bun Parotta & Salna",
+            "category": "South Indian",
+            "price": 169,
+            "image": "https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?auto=format&fit=crop&w=900&q=85",
+            "description": "Crispy flaky Madurai special multi-layered bun parotta served with piping hot spicy chicken salna",
+            "rating": "4.9",
+            "tag": "Must Try 🔥",
+            "color": "#fef3c7",
+        },
+        {
+            "name": "Chicken Kothu Parotta",
+            "category": "South Indian",
+            "price": 219,
+            "image": "https://images.unsplash.com/photo-1589301760014-d929f3979dbc?auto=format&fit=crop&w=900&q=85",
+            "description": "Shredded crispy parotta beaten on cast-iron tawa with eggs, tender chicken pieces, curry leaves & rich gravy",
+            "rating": "4.8",
+            "tag": "Street Icon",
+            "color": "#fee2e2",
+        },
+        {
+            "name": "Dindigul Mutton Biryani",
+            "category": "South Indian",
+            "price": 349,
+            "image": "https://images.unsplash.com/photo-1633945274405-b6c8069047b0?auto=format&fit=crop&w=900&q=85",
+            "description": "Iconic Tamil Nadu delicacy made with short-grain Seeraga Samba rice, tender baby mutton & mild whole spices",
+            "rating": "5.0",
+            "tag": "Chef Signature 👑",
+            "color": "#fed7aa",
+        },
+        {
+            "name": "Chettinad Pepper Chicken Fry",
+            "category": "South Indian",
             "price": 249,
-            "image": "https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=900&q=85",
-            "description": "Classic tomato, mozzarella and basil",
-            "rating": "4.7",
-            "tag": "10% OFF",
-            "color": "#fff0dc",
+            "image": "https://images.unsplash.com/photo-1610057099431-d73a1c9d2f2f?auto=format&fit=crop&w=900&q=85",
+            "description": "Fiery dry roast chicken tossed in freshly roasted stone-ground Chettinad pepper masala & crispy curry leaves",
+            "rating": "4.8",
+            "tag": "Spicy Delight",
+            "color": "#ffe4e6",
+        },
+        {
+            "name": "Ghee Podi Roast Dosa",
+            "category": "South Indian",
+            "price": 149,
+            "image": "https://images.unsplash.com/photo-1668236543090-82eba5ee5976?auto=format&fit=crop&w=900&q=85",
+            "description": "Golden paper-thin crispy fermented rice crepe smeared with fragrant spicy gunpowder podi & pure desi ghee",
+            "rating": "4.9",
+            "tag": "Crispy Gold",
+            "color": "#fef08a",
         },
         {
             "name": "Paneer Butter Masala",
@@ -514,24 +558,14 @@ def seed():
             "color": "#f8e9d7",
         },
         {
-            "name": "Sushi Platter",
-            "category": "Japanese",
-            "price": 349,
-            "image": "https://images.unsplash.com/photo-1579871494447-9811cf80d66c?auto=format&fit=crop&w=900&q=85",
-            "description": "A delicious selection of fresh sushi",
-            "rating": "4.6",
-            "tag": "Chef pick",
-            "color": "#f7e5e6",
-        },
-        {
-            "name": "Chocolate Lava Cake",
-            "category": "Desserts",
-            "price": 149,
-            "image": "https://images.unsplash.com/photo-1606313564200-e75d5e30476c?auto=format&fit=crop&w=900&q=85",
-            "description": "Warm chocolate cake with a soft centre",
-            "rating": "4.8",
-            "tag": "Popular",
-            "color": "#f1e8f4",
+            "name": "Margherita Pizza",
+            "category": "Italian",
+            "price": 249,
+            "image": "https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=900&q=85",
+            "description": "Classic tomato, mozzarella and basil",
+            "rating": "4.7",
+            "tag": "10% OFF",
+            "color": "#fff0dc",
         },
         {
             "name": "Classic Zest Burger",
@@ -542,6 +576,26 @@ def seed():
             "rating": "4.9",
             "tag": "Must try",
             "color": "#fff0df",
+        },
+        {
+            "name": "Kumbakonam Degree Filter Coffee",
+            "category": "Beverages",
+            "price": 59,
+            "image": "https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?auto=format&fit=crop&w=900&q=85",
+            "description": "Authentic South Indian chicory blend filter coffee frothed with thick whole milk in a dabarah",
+            "rating": "4.9",
+            "tag": "Authentic ☕",
+            "color": "#ebd5c1",
+        },
+        {
+            "name": "Chocolate Lava Cake",
+            "category": "Desserts",
+            "price": 149,
+            "image": "https://images.unsplash.com/photo-1606313564200-e75d5e30476c?auto=format&fit=crop&w=900&q=85",
+            "description": "Warm chocolate cake with a soft centre",
+            "rating": "4.8",
+            "tag": "Popular",
+            "color": "#f1e8f4",
         },
     ]
     foods_col.insert_many(sample_foods)

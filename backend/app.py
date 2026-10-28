@@ -35,13 +35,23 @@ client = MongoClient(MONGO_URI)
 db     = client.get_database()
 
 # Collections
-users_col  = db["users"]
-foods_col  = db["foods"]
-orders_col = db["orders"]
+users_col   = db["users"]
+foods_col   = db["foods"]
+orders_col  = db["orders"]
+reviews_col = db["reviews"]
 
 # Indexes
 users_col.create_index([("email", ASCENDING)], unique=True)
 orders_col.create_index([("user_id", ASCENDING)])
+reviews_col.create_index([("food_id", ASCENDING)])
+
+# Available Promo Coupons
+COUPONS = {
+    "AWS20": {"type": "percent", "value": 20, "description": "20% off for AWS Cloud Presentation!"},
+    "CLOUD50": {"type": "flat", "value": 50, "description": "₹50 flat off on meals above ₹299"},
+    "FREEDEL": {"type": "free_delivery", "value": 40, "description": "Free delivery anywhere in town"},
+    "ZESTORA10": {"type": "percent", "value": 10, "description": "10% off welcome bonus"}
+}
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -198,15 +208,17 @@ def place_order():
     if err:
         return err
 
-    data  = request.get_json(silent=True) or {}
-    items = data.get("items", [])
-    address = data.get("address", "")
+    data           = request.get_json(silent=True) or {}
+    items          = data.get("items", [])
+    address        = data.get("address", "")
+    payment_method = data.get("payment_method", "Cash on Delivery")
+    coupon_code    = (data.get("coupon_code") or "").strip().upper()
 
     if not items:
         return jsonify({"error": "Order must contain at least one item"}), 400
 
     enriched = []
-    total = 0.0
+    subtotal = 0.0
     for item in items:
         food_id  = item.get("food_id") or item.get("_id")
         quantity = int(item.get("quantity", 1))
@@ -222,30 +234,189 @@ def place_order():
             except Exception:
                 pass
 
-        subtotal = price * quantity
-        total   += subtotal
+        item_total = price * quantity
+        subtotal  += item_total
         enriched.append({
             "food_id":  str(food_id) if food_id else None,
             "name":     name,
             "price":    price,
             "quantity": quantity,
-            "subtotal": subtotal,
+            "subtotal": item_total,
         })
 
+    # Calculate delivery fee & coupon discount
+    delivery_fee = 0 if subtotal >= 499 else 40
+    discount = 0.0
+
+    if coupon_code and coupon_code in COUPONS:
+        c = COUPONS[coupon_code]
+        if c["type"] == "percent":
+            discount = round(subtotal * (c["value"] / 100.0), 2)
+        elif c["type"] == "flat":
+            discount = min(float(c["value"]), subtotal)
+        elif c["type"] == "free_delivery":
+            delivery_fee = 0
+
+    final_total = max(0.0, round(subtotal + delivery_fee - discount, 2))
+
     order = {
-        "user_id":    user_id,
-        "items":      enriched,
-        "total":      round(total, 2),
-        "address":    address,
-        "status":     "confirmed",
-        "created_at": datetime.now(timezone.utc),
-        "updated_at": datetime.now(timezone.utc),
+        "user_id":        user_id,
+        "items":          enriched,
+        "subtotal":       round(subtotal, 2),
+        "delivery_fee":   delivery_fee,
+        "discount":       discount,
+        "coupon_code":    coupon_code if discount > 0 or (coupon_code == "FREEDEL") else None,
+        "total":          final_total,
+        "address":        address,
+        "payment_method": payment_method,
+        "status":         "confirmed", # confirmed -> preparing -> out_for_delivery -> delivered
+        "eta_minutes":    25,
+        "created_at":     datetime.now(timezone.utc),
+        "updated_at":     datetime.now(timezone.utc),
     }
     result = orders_col.insert_one(order)
     order["_id"] = str(result.inserted_id)
 
-    logger.info("Order placed: %s by user %s — Rs.%.2f", order["_id"], user_id, total)
+    logger.info("Order placed: %s by user %s — Rs.%.2f", order["_id"], user_id, final_total)
     return jsonify(order), 201
+
+
+# ─── Coupon Validation ────────────────────────────────────────────────────────
+
+@app.route("/api/coupons/validate", methods=["POST"])
+def validate_coupon():
+    data        = request.get_json(silent=True) or {}
+    code        = (data.get("code") or "").strip().upper()
+    subtotal    = float(data.get("subtotal", 0.0))
+
+    if not code or code not in COUPONS:
+        return jsonify({"valid": False, "error": "Invalid or expired promo code"}), 400
+
+    c = COUPONS[code]
+    discount = 0.0
+    if c["type"] == "percent":
+        discount = round(subtotal * (c["value"] / 100.0), 2)
+    elif c["type"] == "flat":
+        discount = min(float(c["value"]), subtotal)
+    elif c["type"] == "free_delivery":
+        discount = 40.0
+
+    return jsonify({
+        "valid":       True,
+        "code":        code,
+        "discount":    discount,
+        "type":        c["type"],
+        "description": c["description"],
+    }), 200
+
+
+# ─── Order Tracking & Status Update ───────────────────────────────────────────
+
+@app.route("/api/orders/<order_id>/track", methods=["GET"])
+def track_order(order_id):
+    try:
+        order = orders_col.find_one({"_id": ObjectId(order_id)})
+    except Exception:
+        return jsonify({"error": "Invalid order id"}), 400
+    if not order:
+        return jsonify({"error": "Order not found"}), 404
+
+    # Calculate status progression based on time created
+    created_at = order.get("created_at")
+    current_status = order.get("status", "confirmed")
+
+    steps = [
+        {"status": "confirmed",        "title": "Order Confirmed",    "icon": "📝", "done": True},
+        {"status": "preparing",        "title": "Kitchen Preparing",  "icon": "👨‍🍳", "done": current_status in ["preparing", "out_for_delivery", "delivered"]},
+        {"status": "out_for_delivery", "title": "Out for Delivery",   "icon": "🛵", "done": current_status in ["out_for_delivery", "delivered"]},
+        {"status": "delivered",        "title": "Delivered",          "icon": "🎉", "done": current_status == "delivered"},
+    ]
+
+    return jsonify({
+        "order_id":       str(order["_id"]),
+        "status":         current_status,
+        "eta_minutes":    order.get("eta_minutes", 25),
+        "steps":          steps,
+        "delivery_rider": {"name": "Rohan Sharma", "phone": "+91 98765 43210", "vehicle": "Honda Activa (MH-02-1234)"},
+        "order":          serial(order),
+    }), 200
+
+
+@app.route("/api/orders/<order_id>/status", methods=["PATCH"])
+def update_order_status(order_id):
+    data       = request.get_json(silent=True) or {}
+    new_status = data.get("status")
+    allowed    = ["confirmed", "preparing", "out_for_delivery", "delivered", "cancelled"]
+
+    if new_status not in allowed:
+        return jsonify({"error": f"Invalid status. Allowed: {allowed}"}), 400
+
+    try:
+        res = orders_col.update_one(
+            {"_id": ObjectId(order_id)},
+            {"$set": {"status": new_status, "updated_at": datetime.now(timezone.utc)}}
+        )
+    except Exception:
+        return jsonify({"error": "Invalid order id"}), 400
+
+    if res.matched_count == 0:
+        return jsonify({"error": "Order not found"}), 404
+    return jsonify({"message": f"Order status updated to {new_status}"}), 200
+
+
+# ─── Reviews & Ratings ────────────────────────────────────────────────────────
+
+@app.route("/api/foods/<food_id>/reviews", methods=["GET"])
+def get_food_reviews(food_id):
+    reviews = list(reviews_col.find({"food_id": food_id}).sort("created_at", -1))
+    for r in reviews:
+        r["_id"] = str(r["_id"])
+    return jsonify(reviews), 200
+
+
+@app.route("/api/foods/<food_id>/reviews", methods=["POST"])
+def add_food_review(food_id):
+    data      = request.get_json(silent=True) or {}
+    user_name = data.get("user_name", "Foodie Guest").strip()
+    rating    = int(data.get("rating", 5))
+    comment   = data.get("comment", "").strip()
+
+    if not comment:
+        return jsonify({"error": "Comment cannot be empty"}), 400
+
+    review = {
+        "food_id":    food_id,
+        "user_name":  user_name,
+        "rating":     max(1, min(5, rating)),
+        "comment":    comment,
+        "created_at": datetime.now(timezone.utc),
+    }
+    reviews_col.insert_one(review)
+    review["_id"] = str(review["_id"])
+    return jsonify(review), 201
+
+
+# ─── Admin Dashboard & Analytics ─────────────────────────────────────────────
+
+@app.route("/api/admin/stats", methods=["GET"])
+def admin_stats():
+    all_orders = list(orders_col.find())
+    total_revenue = sum(o.get("total", 0.0) for o in all_orders if o.get("status") != "cancelled")
+    total_orders  = len(all_orders)
+    active_orders = len([o for o in all_orders if o.get("status") in ["confirmed", "preparing", "out_for_delivery"]])
+
+    return jsonify({
+        "total_revenue": round(total_revenue, 2),
+        "total_orders":  total_orders,
+        "active_orders": active_orders,
+        "total_foods":   foods_col.count_documents({}),
+    }), 200
+
+
+@app.route("/api/admin/orders", methods=["GET"])
+def admin_orders():
+    orders = [serial(o) for o in orders_col.find().sort("created_at", -1).limit(50)]
+    return jsonify(orders), 200
 
 
 @app.route("/api/orders", methods=["GET"])

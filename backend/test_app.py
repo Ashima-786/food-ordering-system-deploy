@@ -171,6 +171,26 @@ class ZestoraTestCase(unittest.TestCase):
         verify_res = self.client.get(f"/api/orders/{order_id}", headers={"Authorization": f"Bearer {token}"})
         self.assertEqual(verify_res.get_json()["status"], "cancelled")
 
+    def test_integration_coupon_validation(self):
+        """Test coupon validation API endpoint."""
+        res = self.client.post("/api/coupons/validate", json={"code": "AWS20", "subtotal": 500})
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertTrue(data["valid"])
+        self.assertEqual(data["discount"], 100.0)
+
+        # Invalid coupon
+        bad_res = self.client.post("/api/coupons/validate", json={"code": "INVALID_CODE", "subtotal": 500})
+        self.assertEqual(bad_res.status_code, 400)
+
+    def test_integration_admin_stats(self):
+        """Test admin dashboard statistics."""
+        res = self.client.get("/api/admin/stats")
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertIn("total_revenue", data)
+        self.assertIn("total_orders", data)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -22,6 +22,7 @@ type ActiveView =
   | 'restaurants'
   | 'restaurant-menu'
   | 'orders'
+  | 'admin'
 
 type Restaurant = {
   id: string
@@ -158,12 +159,14 @@ function FoodCard({
   favorite,
   onToggleFavorite,
   onAddToCart,
+  onOpenReviews,
 }: {
   food: Food
   quantity: number
   favorite: boolean
   onToggleFavorite: () => void
   onAddToCart: () => void
+  onOpenReviews?: () => void
 }) {
   return (
     <article className="food-card">
@@ -210,7 +213,14 @@ function FoodCard({
         <div className="food-bottom">
           <div>
             <strong>₹{food.price}</strong>
-            <span className="food-rating">★ {food.rating}</span>
+            <span
+              className="food-rating"
+              onClick={onOpenReviews}
+              style={{ cursor: onOpenReviews ? 'pointer' : 'default', marginLeft: '6px' }}
+              title="Click to view ratings & reviews"
+            >
+              ★ {food.rating} {onOpenReviews ? '💬' : ''}
+            </span>
           </div>
 
           <button
@@ -378,6 +388,33 @@ function App() {
   const [orderError, setOrderError] = useState('')
   const [userOrders, setUserOrders] = useState<any[]>([])
   const [ordersLoading, setOrdersLoading] = useState(false)
+
+  // Extra Features: Coupons & Discounts
+  const [appliedCoupon, setAppliedCoupon] = useState<{
+    code: string
+    discount: number
+    description: string
+  } | null>(null)
+  const [couponCodeInput, setCouponCodeInput] = useState('')
+  const [couponMessage, setCouponMessage] = useState('')
+  const [couponValidating, setCouponValidating] = useState(false)
+
+  // Extra Features: Payment Method
+  const [paymentMethod, setPaymentMethod] = useState<string>('UPI / GPay')
+
+  // Extra Features: Food Reviews Modal
+  const [reviewModalFood, setReviewModalFood] = useState<Food | null>(null)
+  const [foodReviews, setFoodReviews] = useState<any[]>([])
+  const [reviewsLoading, setReviewsLoading] = useState(false)
+  const [reviewAuthor, setReviewAuthor] = useState('')
+  const [reviewRating, setReviewRating] = useState(5)
+  const [reviewText, setReviewText] = useState('')
+  const [reviewSubmitting, setReviewSubmitting] = useState(false)
+
+  // Extra Features: Admin Kitchen KDS
+  const [adminOrders, setAdminOrders] = useState<any[]>([])
+  const [adminStats, setAdminStats] = useState<any | null>(null)
+  const [adminLoading, setAdminLoading] = useState(false)
     
 useEffect(() => {
   let cancelled = false
@@ -501,8 +538,9 @@ const subtotal = cartItems.reduce(
   0
 )
 
-  const deliveryFee = subtotal === 0 || subtotal >= 499 ? 0 : 40
-  const total = subtotal + deliveryFee
+  const deliveryFee = subtotal === 0 || subtotal >= 499 || appliedCoupon?.code === 'FREEDEL' ? 0 : 40
+  const discountAmount = appliedCoupon ? appliedCoupon.discount : 0
+  const total = Math.max(0, subtotal + deliveryFee - discountAmount)
 
   const visibleFoods = foods.filter((food) => {
     const matchesCategory =
@@ -661,6 +699,8 @@ const subtotal = cartItems.reduce(
         body: JSON.stringify({
           items,
           address: deliveryAddress.trim(),
+          payment_method: paymentMethod,
+          coupon_code: appliedCoupon?.code,
         }),
       })
 
@@ -671,10 +711,122 @@ const subtotal = cartItems.reduce(
 
       setOrderSuccess(orderData)
       setCart({})
+      setAppliedCoupon(null)
     } catch (err: any) {
       setOrderError(err.message || 'Something went wrong while placing your order.')
     } finally {
       setOrderSubmitting(false)
+    }
+  }
+
+  // ─── Extra Features Handlers ──────────────────────────────────────────────────
+
+  const applyCouponCode = async (codeToTry?: string) => {
+    const code = (codeToTry || couponCodeInput).trim().toUpperCase()
+    if (!code) return
+    setCouponValidating(true)
+    setCouponMessage('')
+    try {
+      const res = await fetch('/api/coupons/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, subtotal }),
+      })
+      const data = await res.json()
+      if (res.ok && data.valid) {
+        setAppliedCoupon({
+          code: data.code,
+          discount: data.discount,
+          description: data.description,
+        })
+        setCouponCodeInput('')
+        setCouponMessage(`🎉 ${data.description} (Saved ₹${data.discount})`)
+      } else {
+        setCouponMessage(data.error || 'Invalid promo code')
+      }
+    } catch {
+      setCouponMessage('Unable to validate promo code')
+    } finally {
+      setCouponValidating(false)
+    }
+  }
+
+  const loadAdminData = async () => {
+    setAdminLoading(true)
+    try {
+      const [statsRes, ordersRes] = await Promise.all([
+        fetch('/api/admin/stats'),
+        fetch('/api/admin/orders'),
+      ])
+      if (statsRes.ok) setAdminStats(await statsRes.json())
+      if (ordersRes.ok) setAdminOrders(await ordersRes.json())
+    } catch {
+      console.error('Failed to load admin data')
+    } finally {
+      setAdminLoading(false)
+    }
+  }
+
+  const updateOrderStatus = async (orderId: string, newStatus: string) => {
+    try {
+      const res = await fetch(`/api/orders/${orderId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      })
+      if (res.ok) {
+        // Refresh local orders list
+        setAdminOrders((prev) =>
+          prev.map((o) => (o._id === orderId ? { ...o, status: newStatus } : o))
+        )
+        setUserOrders((prev) =>
+          prev.map((o) => (o._id === orderId ? { ...o, status: newStatus } : o))
+        )
+      }
+    } catch {
+      console.error('Failed to update status')
+    }
+  }
+
+  const handleOpenReviews = async (food: Food) => {
+    setReviewModalFood(food)
+    setReviewsLoading(true)
+    setFoodReviews([])
+    try {
+      const res = await fetch(`/api/foods/${food.id}/reviews`)
+      if (res.ok) {
+        setFoodReviews(await res.json())
+      }
+    } catch {
+      console.error('Failed to fetch reviews')
+    } finally {
+      setReviewsLoading(false)
+    }
+  }
+
+  const handleSubmitReview = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!reviewModalFood || !reviewText.trim()) return
+    setReviewSubmitting(true)
+    try {
+      const res = await fetch(`/api/foods/${reviewModalFood.id}/reviews`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_name: reviewAuthor.trim() || 'Verified Foodie',
+          rating: reviewRating,
+          comment: reviewText.trim(),
+        }),
+      })
+      if (res.ok) {
+        const newReview = await res.json()
+        setFoodReviews((prev) => [newReview, ...prev])
+        setReviewText('')
+      }
+    } catch {
+      console.error('Failed to post review')
+    } finally {
+      setReviewSubmitting(false)
     }
   }
 
@@ -688,6 +840,7 @@ const subtotal = cartItems.reduce(
           favorite={favorites.includes(food.id)}
           onToggleFavorite={() => toggleFavorite(food.id)}
           onAddToCart={() => addToCart(food.id)}
+          onOpenReviews={() => handleOpenReviews(food)}
         />
       ))}
     </div>
@@ -759,6 +912,22 @@ const subtotal = cartItems.reduce(
           >
             <span>📋</span>
             <small>My Orders</small>
+          </button>
+
+          <button
+            type="button"
+            className={`nav-action-button ${
+              activeView === 'admin' ? 'nav-action-selected' : ''
+            }`}
+            onClick={() => {
+              setCartOpen(false)
+              setActiveView('admin')
+              loadAdminData()
+              window.scrollTo({ top: 0, behavior: 'smooth' })
+            }}
+          >
+            <span>👨‍🍳</span>
+            <small>Kitchen KDS</small>
           </button>
 
           <button
@@ -1499,9 +1668,215 @@ const subtotal = cartItems.reduce(
                           Total: ₹{ord.total}
                         </span>
                       </div>
+
+                      {/* Live Tracker Stepper */}
+                      <div className="tracker-stepper">
+                        {[
+                          { key: 'confirmed', label: 'Confirmed', icon: '📝' },
+                          { key: 'preparing', label: 'Preparing', icon: '👨‍🍳' },
+                          { key: 'out_for_delivery', label: 'On The Way', icon: '🛵' },
+                          { key: 'delivered', label: 'Delivered', icon: '🎉' },
+                        ].map((step, sIdx) => {
+                          const statusOrder = ['confirmed', 'preparing', 'out_for_delivery', 'delivered']
+                          const currentIdx = statusOrder.indexOf(ord.status || 'confirmed')
+                          const isDone = currentIdx >= sIdx
+                          const isCurrent = currentIdx === sIdx
+                          return (
+                            <div
+                              key={step.key}
+                              className={`tracker-step ${isDone ? 'is-done' : ''} ${isCurrent ? 'is-current' : ''}`}
+                            >
+                              <div className="tracker-icon-circle">{step.icon}</div>
+                              <div className="tracker-step-title">{step.label}</div>
+                            </div>
+                          )
+                        })}
+                      </div>
+
+                      {/* Rider Card & Live Simulation Action */}
+                      {ord.status !== 'cancelled' && ord.status !== 'delivered' && (
+                        <div className="rider-card">
+                          <span style={{ fontSize: '1.4rem' }}>🛵</span>
+                          <div style={{ flex: 1, fontSize: '0.85rem' }}>
+                            <strong>Rohan Sharma is delivering your order</strong>
+                            <br />
+                            <small style={{ color: '#64748b' }}>
+                              ETA: ~20-25 mins · Payment: {ord.payment_method || 'COD'}
+                            </small>
+                          </div>
+                          <button
+                            type="button"
+                            style={{
+                              background: '#ffede0',
+                              color: '#ed650e',
+                              border: '1px solid #ffd8c0',
+                              padding: '6px 12px',
+                              borderRadius: '8px',
+                              fontWeight: 700,
+                              fontSize: '0.75rem',
+                              cursor: 'pointer',
+                            }}
+                            onClick={() => {
+                              const next =
+                                ord.status === 'confirmed'
+                                  ? 'preparing'
+                                  : ord.status === 'preparing'
+                                  ? 'out_for_delivery'
+                                  : 'delivered'
+                              updateOrderStatus(ord._id, next)
+                            }}
+                            title="Click to simulate live delivery progress"
+                          >
+                            Advance Status ⚡
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
+              )}
+            </section>
+          ) : activeView === 'admin' ? (
+            <section className="content-section kds-container">
+              <button
+                type="button"
+                className="text-link"
+                onClick={returnHome}
+              >
+                ← Back to Menu
+              </button>
+
+              <div className="shopping-heading">
+                <span className="eyebrow">RESTAURANT KITCHEN DISPLAY</span>
+                <h1>Kitchen KDS & Live Analytics</h1>
+                <p>Real-time order fulfillment & kitchen management dashboard.</p>
+              </div>
+
+              {adminLoading ? (
+                <p>Loading kitchen metrics...</p>
+              ) : (
+                <>
+                  <div className="kds-stats-grid">
+                    <div className="kds-stat-card">
+                      <div className="kds-stat-label">Total Revenue</div>
+                      <div className="kds-stat-val" style={{ color: '#10b981' }}>
+                        ₹{adminStats?.total_revenue ?? 0}
+                      </div>
+                    </div>
+                    <div className="kds-stat-card">
+                      <div className="kds-stat-label">Total Orders</div>
+                      <div className="kds-stat-val">
+                        {adminStats?.total_orders ?? 0}
+                      </div>
+                    </div>
+                    <div className="kds-stat-card">
+                      <div className="kds-stat-label">Active In Kitchen</div>
+                      <div className="kds-stat-val" style={{ color: '#ed650e' }}>
+                        {adminStats?.active_orders ?? 0}
+                      </div>
+                    </div>
+                    <div className="kds-stat-card">
+                      <div className="kds-stat-label">Menu Items</div>
+                      <div className="kds-stat-val">
+                        {adminStats?.total_foods ?? foods.length}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                    <h2>Live Incoming Orders ({adminOrders.length})</h2>
+                    <button
+                      type="button"
+                      className="primary-button"
+                      style={{ padding: '8px 16px', fontSize: '0.85rem' }}
+                      onClick={loadAdminData}
+                    >
+                      🔄 Refresh Kitchen
+                    </button>
+                  </div>
+
+                  {adminOrders.length === 0 ? (
+                    <div className="shopping-empty">
+                      <span>🍳</span>
+                      <h2>No orders in kitchen queue.</h2>
+                      <p>Orders placed by customers will appear here in real time.</p>
+                    </div>
+                  ) : (
+                    <div className="kds-orders-grid">
+                      {adminOrders.map((ord: any) => (
+                        <div key={ord._id} className={`kds-order-card status-${ord.status}`}>
+                          <div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <strong style={{ fontSize: '1.05rem' }}>
+                                #{ord._id.slice(-6).toUpperCase()}
+                              </strong>
+                              <span className={`order-status-badge order-status-${ord.status}`}>
+                                {ord.status}
+                              </span>
+                            </div>
+                            <small style={{ color: '#78716c' }}>
+                              {new Date(ord.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {ord.payment_method || 'COD'}
+                            </small>
+                            <p style={{ margin: '8px 0', fontSize: '0.9rem', color: '#444' }}>
+                              📍 {ord.address}
+                            </p>
+
+                            <div style={{ borderTop: '1px solid #f1e9df', margin: '8px 0', paddingTop: '8px' }}>
+                              {ord.items?.map((it: any, idx: number) => (
+                                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', margin: '3px 0' }}>
+                                  <span>{it.quantity}x {it.name}</span>
+                                  <strong>₹{it.subtotal || it.price * it.quantity}</strong>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, marginTop: '8px', fontSize: '1rem', color: '#ed650e' }}>
+                              <span>Total:</span>
+                              <span>₹{ord.total}</span>
+                            </div>
+
+                            <div className="kds-actions">
+                              {ord.status === 'confirmed' && (
+                                <button
+                                  type="button"
+                                  className="kds-btn kds-btn-prepare"
+                                  onClick={() => updateOrderStatus(ord._id, 'preparing')}
+                                >
+                                  🍳 Start Cooking
+                                </button>
+                              )}
+                              {ord.status === 'preparing' && (
+                                <button
+                                  type="button"
+                                  className="kds-btn kds-btn-dispatch"
+                                  onClick={() => updateOrderStatus(ord._id, 'out_for_delivery')}
+                                >
+                                  🛵 Dispatch Rider
+                                </button>
+                              )}
+                              {ord.status === 'out_for_delivery' && (
+                                <button
+                                  type="button"
+                                  className="kds-btn kds-btn-deliver"
+                                  onClick={() => updateOrderStatus(ord._id, 'delivered')}
+                                >
+                                  ✅ Mark Delivered
+                                </button>
+                              )}
+                              {ord.status === 'delivered' && (
+                                <span style={{ fontSize: '0.85rem', color: '#10b981', fontWeight: 700, padding: '8px 0' }}>
+                                  Order Completed 🎉
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
             </section>
           ) : (
@@ -1675,6 +2050,84 @@ const subtotal = cartItems.reduce(
                     </strong>
                   </p>
 
+                  {discountAmount > 0 && (
+                    <p style={{ color: '#10b981' }}>
+                      <span>Discount ({appliedCoupon?.code})</span>
+                      <strong>- ₹{discountAmount}</strong>
+                    </p>
+                  )}
+
+                  {/* Promo Coupons Section */}
+                  <div className="promo-section">
+                    <div className="promo-header">
+                      <span>🏷️ Promo Discount Code</span>
+                    </div>
+                    {appliedCoupon ? (
+                      <div className="promo-applied-tag">
+                        <span>✓ {appliedCoupon.code} applied!</span>
+                        <button
+                          type="button"
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#dc2626',
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                          }}
+                          onClick={() => {
+                            setAppliedCoupon(null)
+                            setCouponMessage('')
+                          }}
+                        >
+                          ✕ Remove
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="promo-input-group">
+                          <input
+                            type="text"
+                            placeholder="e.g. AWS20"
+                            value={couponCodeInput}
+                            onChange={(e) => setCouponCodeInput(e.target.value)}
+                          />
+                          <button
+                            type="button"
+                            className="primary-button"
+                            style={{ padding: '8px 14px', fontSize: '0.82rem' }}
+                            onClick={() => applyCouponCode()}
+                            disabled={couponValidating}
+                          >
+                            {couponValidating ? '...' : 'Apply'}
+                          </button>
+                        </div>
+                        {couponMessage && (
+                          <small
+                            style={{
+                              color: couponMessage.includes('Invalid') ? '#dc2626' : '#10b981',
+                              display: 'block',
+                              marginTop: '6px',
+                              fontWeight: 600,
+                            }}
+                          >
+                            {couponMessage}
+                          </small>
+                        )}
+                        <div className="promo-pills">
+                          <span className="promo-pill" onClick={() => applyCouponCode('AWS20')}>
+                            AWS20 (20% OFF)
+                          </span>
+                          <span className="promo-pill" onClick={() => applyCouponCode('CLOUD50')}>
+                            CLOUD50 (₹50 OFF)
+                          </span>
+                          <span className="promo-pill" onClick={() => applyCouponCode('FREEDEL')}>
+                            FREEDEL (Free Del)
+                          </span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
                   {subtotal > 0 && subtotal < 499 && (
                     <small className="delivery-note">
                       Add ₹{499 - subtotal} more for free delivery.
@@ -1806,6 +2259,34 @@ const subtotal = cartItems.reduce(
                   />
                 </div>
 
+                <div className="form-group">
+                  <label>Select Payment Method</label>
+                  <div className="payment-method-selector">
+                    {[
+                      { id: 'UPI / GPay', label: '⚡ UPI / Google Pay / PhonePe', desc: 'Instant & Secure' },
+                      { id: 'Cash on Delivery', label: '💵 Cash on Delivery (COD)', desc: 'Pay when food arrives' },
+                      { id: 'Credit / Debit Card', label: '💳 Credit / Debit Card', desc: 'Visa, MasterCard, RuPay' },
+                    ].map((m) => (
+                      <div
+                        key={m.id}
+                        className={`payment-method-option ${paymentMethod === m.id ? 'is-selected' : ''}`}
+                        onClick={() => setPaymentMethod(m.id)}
+                      >
+                        <input
+                          type="radio"
+                          name="paymentMethod"
+                          checked={paymentMethod === m.id}
+                          onChange={() => setPaymentMethod(m.id)}
+                        />
+                        <div>
+                          <div>{m.label}</div>
+                          <small style={{ color: '#888' }}>{m.desc}</small>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="checkout-summary-box">
                   <div className="checkout-summary-row">
                     <span>Items ({cartCount})</span>
@@ -1815,6 +2296,12 @@ const subtotal = cartItems.reduce(
                     <span>Delivery Fee</span>
                     <span>{deliveryFee === 0 ? 'FREE' : `₹${deliveryFee}`}</span>
                   </div>
+                  {discountAmount > 0 && (
+                    <div className="checkout-summary-row" style={{ color: '#10b981', fontWeight: 700 }}>
+                      <span>Discount ({appliedCoupon?.code})</span>
+                      <span>- ₹{discountAmount}</span>
+                    </div>
+                  )}
                   <div className="checkout-summary-row total">
                     <span>Total Amount</span>
                     <span>₹{total}</span>
@@ -1831,6 +2318,117 @@ const subtotal = cartItems.reduce(
                 </button>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ─── Food Reviews & Ratings Modal ────────────────────────────────────────── */}
+      {reviewModalFood && (
+        <div
+          className="review-modal-overlay"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && !reviewSubmitting) {
+              setReviewModalFood(null)
+            }
+          }}
+        >
+          <div className="review-modal" role="dialog" aria-modal="true">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+              <div>
+                <span className="eyebrow">{reviewModalFood.category}</span>
+                <h2 style={{ margin: '4px 0' }}>{reviewModalFood.name}</h2>
+              </div>
+              <button
+                type="button"
+                className="checkout-close"
+                onClick={() => setReviewModalFood(null)}
+              >
+                ×
+              </button>
+            </div>
+
+            <p style={{ color: '#666', margin: '8px 0 16px' }}>
+              {reviewModalFood.description} · <strong style={{ color: '#ed650e' }}>₹{reviewModalFood.price}</strong>
+            </p>
+
+            <div style={{ borderTop: '1px solid #f1e9df', paddingTop: '16px' }}>
+              <h3>Customer Reviews & Ratings ({foodReviews.length})</h3>
+
+              {reviewsLoading ? (
+                <p>Loading customer reviews...</p>
+              ) : foodReviews.length === 0 ? (
+                <p style={{ color: '#888', fontStyle: 'italic', margin: '12px 0' }}>
+                  No customer reviews yet. Be the first food critic to share your review!
+                </p>
+              ) : (
+                <div className="reviews-list">
+                  {foodReviews.map((r: any, idx: number) => (
+                    <div key={idx} className="review-item">
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <strong>{r.user_name}</strong>
+                        <span style={{ color: '#f59e0b' }}>{'★'.repeat(r.rating || 5)}</span>
+                      </div>
+                      <p style={{ margin: '4px 0 0', color: '#444', fontSize: '0.92rem' }}>
+                        "{r.comment}"
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Add New Review Form */}
+              <form onSubmit={handleSubmitReview} style={{ marginTop: '20px', background: '#faf5ee', padding: '16px', borderRadius: '12px' }}>
+                <h4 style={{ margin: '0 0 10px' }}>Leave a Review</h4>
+
+                <div className="form-group">
+                  <label>Your Rating</label>
+                  <div className="star-rating-select">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <span
+                        key={star}
+                        className={star <= reviewRating ? 'is-active' : ''}
+                        onClick={() => setReviewRating(star)}
+                      >
+                        ★
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="review-author">Your Name</label>
+                  <input
+                    id="review-author"
+                    type="text"
+                    placeholder="e.g. Rahul Sharma"
+                    value={reviewAuthor}
+                    onChange={(e) => setReviewAuthor(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="review-text">Review Comment</label>
+                  <textarea
+                    id="review-text"
+                    rows={2}
+                    placeholder="Taste, portion size, delivery experience..."
+                    value={reviewText}
+                    onChange={(e) => setReviewText(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="primary-button"
+                  style={{ width: '100%', marginTop: '10px' }}
+                  disabled={reviewSubmitting || !reviewText.trim()}
+                >
+                  {reviewSubmitting ? 'Submitting...' : 'Submit Review ⭐'}
+                </button>
+              </form>
+            </div>
           </div>
         </div>
       )}

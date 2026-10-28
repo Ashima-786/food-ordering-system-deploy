@@ -304,7 +304,7 @@ docker compose exec mongo mongosh zestora
 
 The repository includes a complete production-grade DevOps setup for AWS EC2:
 
-* **CI/CD Pipeline (`.github/workflows/`)**: Automated testing, linting, Trivy security scanning, and deployment via SSH.
+* **Direct Secure Deployment (`scripts/update-live-ec2.sh`)**: Direct, secure deployment over SSH without external runner dependencies.
 * **Infrastructure as Code (`terraform/`)**: Automated provisioning of VPC, Subnet, Security Groups, IAM, S3 backup bucket, and EC2 with Elastic IP.
 * **Production Docker Compose (`docker-compose.prod.yml`)**: Binds port 80/443 to Nginx edge proxy, enforces container CPU & memory limits, and configures Docker log rotation.
 * **Automated S3 Backups (`scripts/backup-mongo-s3.sh`)**: Dumps MongoDB and uploads compressed archives directly to Amazon S3.

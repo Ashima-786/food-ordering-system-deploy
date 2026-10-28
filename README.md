@@ -1,6 +1,21 @@
 # 🍔 Zestora – Online Food Ordering System
 
-A full-stack food ordering platform built with **React + TypeScript**, **Flask**, and **MongoDB**, containerised with **Docker** and **Docker Compose**.
+A full-stack food ordering platform built with **React + TypeScript**, **Flask**, and **MongoDB**, containerised with **Docker** and **Docker Compose**, and deployed on a zero-cost single-instance **AWS EC2 architecture**.
+
+🌐 **Live Production Deployment:** [http://54.234.169.116](http://54.234.169.116)
+
+---
+
+## ✨ Key Features
+
+- **Authentic Tamil & South Indian Cuisine:** Ambur Chicken Dum Biryani, Madurai Bun Parotta & Salna, Chicken Kothu Parotta, Dindigul Mutton Biryani, Chettinad Pepper Chicken Fry, Ghee Podi Roast Dosa, and Kumbakonam Degree Filter Coffee.
+- **Instant Live Search Dropdown:** Real-time dish matching across names, categories, descriptions, and tags with 1-click cart addition.
+- **Promo Coupon System:** Dynamic promo code validation engine (`AWS20` for 20% off, `CLOUD50` for ₹50 off, `FREEDEL` for free delivery).
+- **Real-Time 4-Step Order Tracking:** Live order stepper timeline (Confirmed ➔ Kitchen Preparing ➔ Out for Delivery ➔ Delivered) with simulated status advance.
+- **Kitchen Display System (KDS):** Real-time admin kitchen dashboard displaying active orders, revenue metrics, and 1-click fulfillment toggles.
+- **Customer Reviews & Ratings:** 1–5 star interactive review modal for all dishes.
+- **Zero-Cost AWS EC2 Architecture:** Deployed strictly within AWS Free Tier on a single `t3.micro` instance with 2GB swap and a 10-day auto-destruction safety timer.
+- **Automated Test Suite:** 12 automated unit and integration tests covering auth, catalog, orders, coupons, tracking, reviews, and admin APIs.
 
 ---
 
@@ -182,10 +197,37 @@ online-food-ordering/
 
 ### Utility
 
-| Method | Endpoint        | Description              |
-|--------|-----------------|--------------------------|
-| GET    | `/api/health`   | Service health check     |
-| POST   | `/api/seed`     | Seed DB with sample data |
+| Method | Endpoint                    | Description                                  |
+|--------|-----------------------------|----------------------------------------------|
+| GET    | `/api/health`               | Service health check                         |
+| POST   | `/api/seed?force=true`      | Seed DB with authentic Tamil & Indian foods  |
+
+### Promo Coupons
+
+| Method | Endpoint                | Description                                  |
+|--------|-------------------------|----------------------------------------------|
+| POST   | `/api/coupons/validate` | Validate promo codes (`AWS20`, `CLOUD50`, `FREEDEL`) |
+
+### Live Order Tracking & Management
+
+| Method | Endpoint                     | Description                                  |
+|--------|------------------------------|----------------------------------------------|
+| GET    | `/api/orders/:id/track`      | 4-step live order tracking timeline & ETA    |
+| PATCH  | `/api/orders/:id/status`     | Advance order status (`preparing`, `delivered`) |
+
+### Customer Reviews & Ratings
+
+| Method | Endpoint                     | Description                                  |
+|--------|------------------------------|----------------------------------------------|
+| GET    | `/api/foods/:id/reviews`     | Get all customer reviews for a food item     |
+| POST   | `/api/foods/:id/reviews`     | Submit a new review and 1–5 star rating      |
+
+### Kitchen Display System (KDS / Admin)
+
+| Method | Endpoint                     | Description                                  |
+|--------|------------------------------|----------------------------------------------|
+| GET    | `/api/admin/stats`           | Get total revenue, orders, and fulfillment   |
+| GET    | `/api/admin/orders`          | List active kitchen orders for fulfillment   |
 
 ---
 

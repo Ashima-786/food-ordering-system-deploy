@@ -191,6 +191,50 @@ class ZestoraTestCase(unittest.TestCase):
         self.assertIn("total_revenue", data)
         self.assertIn("total_orders", data)
 
+    def test_integration_order_tracking_and_status(self):
+        """Test real-time order tracking and status advance."""
+        # 1. Place order
+        reg_res = self.client.post("/api/auth/register", json={
+            "name": self.test_name,
+            "email": self.test_email,
+            "password": self.test_password
+        })
+        token = reg_res.get_json()["token"]
+        order_res = self.client.post("/api/orders", json={
+            "items": [{"name": "Ambur Chicken Dum Biryani", "price": 279, "quantity": 1}],
+            "address": "Unit Test Address"
+        }, headers={"Authorization": f"Bearer {token}"})
+        order_id = order_res.get_json()["_id"]
+
+        # 2. Track order
+        track_res = self.client.get(f"/api/orders/{order_id}/track")
+        self.assertEqual(track_res.status_code, 200)
+        track_data = track_res.get_json()
+        self.assertEqual(track_data["status"], "confirmed")
+        self.assertIn("steps", track_data)
+
+        # 3. Update status to preparing
+        patch_res = self.client.patch(f"/api/orders/{order_id}/status", json={"status": "preparing"})
+        self.assertEqual(patch_res.status_code, 200)
+        self.assertEqual(patch_res.get_json()["status"], "preparing")
+
+    def test_integration_food_reviews(self):
+        """Test customer food ratings and reviews."""
+        # Post review
+        review_res = self.client.post("/api/foods/1/reviews", json={
+            "user_name": "Arun Kumar",
+            "rating": 5,
+            "comment": "Authentic taste of Ambur biryani!"
+        })
+        self.assertEqual(review_res.status_code, 201)
+
+        # Fetch reviews
+        get_res = self.client.get("/api/foods/1/reviews")
+        self.assertEqual(get_res.status_code, 200)
+        reviews = get_res.get_json()
+        self.assertGreaterEqual(len(reviews), 1)
+        self.assertEqual(reviews[0]["user_name"], "Arun Kumar")
+
 
 if __name__ == "__main__":
     unittest.main()

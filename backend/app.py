@@ -361,7 +361,7 @@ def update_order_status(order_id):
 
     if res.matched_count == 0:
         return jsonify({"error": "Order not found"}), 404
-    return jsonify({"message": f"Order status updated to {new_status}"}), 200
+    return jsonify({"message": f"Order status updated to {new_status}", "status": new_status}), 200
 
 
 # ─── Reviews & Ratings ────────────────────────────────────────────────────────

@@ -1,0 +1,61 @@
+name: Deploy to AWS EC2
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, project ]
+
+jobs:
+  deploy:
+    name: Deploy Application to EC2
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Deploy to EC2 via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER || 'ubuntu' }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: ${{ secrets.EC2_PORT || 22 }}
+          script: |
+            set -e
+            APP_DIR="/home/ubuntu/app"
+
+            echo "Ensuring application directory exists at ${APP_DIR}..."
+            mkdir -p ${APP_DIR}
+
+            if [ -d "${APP_DIR}/.git" ]; then
+              echo "Pulling latest changes from Git..."
+              cd ${APP_DIR}
+              git fetch --all
+              git reset --hard origin/${{ github.ref_name }}
+            else
+              echo "Cloning repository for the first time..."
+              git clone -b ${{ github.ref_name }} https://github.com/${{ github.repository }}.git ${APP_DIR}
+              cd ${APP_DIR}
+            fi
+
+            # Setup .env file if it doesn't exist
+            if [ ! -f .env ]; then
+              echo "Creating initial .env from template..."
+              cp .env.example .env
+              # Generate secure random JWT secret
+              RANDOM_SECRET=$(openssl rand -hex 32)
+              sed -i "s|zestora_change_me_in_production_please|${RANDOM_SECRET}|g" .env
+            fi
+
+            # Make deployment scripts executable
+            chmod +x scripts/*.sh
+
+            # Execute deployment
+            ./scripts/deploy.sh
+
+      - name: Verify Live Deployment Health
+        run: |
+          echo "Verifying application is live at http://${{ secrets.EC2_HOST }}/api/health..."
+          curl -f --retry 5 --retry-delay 5 --connect-timeout 10 "http://${{ secrets.EC2_HOST }}/api/health"
+          echo "Application is live and responding with HTTP 200 OK!"
+

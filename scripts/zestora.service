@@ -1,0 +1,18 @@
+[Unit]
+Description=Zestora Ordering System Docker Compose Application
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=ubuntu
+WorkingDirectory=/home/ubuntu/app
+ExecStart=/usr/bin/docker compose -f docker-compose.prod.yml up -d
+ExecStop=/usr/bin/docker compose -f docker-compose.prod.yml down
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
+

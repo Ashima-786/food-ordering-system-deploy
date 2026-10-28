@@ -1,0 +1,18 @@
+# AWS Region
+aws_region = "us-east-1"
+
+# Environment
+environment  = "production"
+project_name = "zestora"
+
+# EC2 Instance sizing (t2.micro is AWS Free Tier eligible: 1 vCPU, 1GB RAM + 2GB swap)
+instance_type    = "t2.micro"
+root_volume_size = 20
+
+# Name of your existing AWS Key Pair (leave blank if connecting via AWS SSM)
+ssh_key_name = "my-aws-keypair"
+
+# Restrict SSH access to your public IP (recommended instead of 0.0.0.0/0)
+# Find your IP by visiting https://checkip.amazonaws.com
+admin_ip_cidr = "0.0.0.0/0"
+

@@ -16,7 +16,14 @@ import logging
 # ─── App & Config ────────────────────────────────────────────────────────────
 
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:3000", "http://localhost:3001", "http://localhost:5173", "http://frontend:3000"])
+
+cors_origins_env = os.getenv("CORS_ORIGINS", "")
+if cors_origins_env:
+    allowed_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
+else:
+    allowed_origins = ["http://localhost:3000", "http://localhost:3001", "http://localhost:5173", "http://frontend:3000", "*"]
+
+CORS(app, origins=allowed_origins)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
